@@ -1,18 +1,21 @@
 """
-TEE核心处理器
-整合加密、特征管理、风险计算等模块，实现完整的TEE功能
+TEE处理器模块
+使用国密算法处理加密的用户特征数据
 """
+import json
 import logging
 import time
 import gc
 from typing import Dict, Any, Optional, Tuple, List
+from datetime import datetime, timezone
 from core.crypto_engine import get_crypto_engine, CryptoError, initialize_crypto_engine
 from core.feature_manager import get_feature_manager, FeatureManagerError, initialize_feature_manager
 from core.rba_engine import get_rba_engine, RBACalculationError, initialize_rba_engine
 from utils.db_manager import get_db_manager, DatabaseError, initialize_database
-from utils.memory_monitor import get_memory_status, cleanup_memory, initialize_memory_monitor
+from utils.memory_monitor import get_memory_status, cleanup_memory, initialize_memory_monitor, MemoryMonitor
 from utils.validators import ValidationError
 from config import get_all_configs
+from .sm_crypto_engine import get_sm_crypto_engine, SMCryptoError
 
 
 class TEEProcessorError(Exception):
@@ -21,16 +24,25 @@ class TEEProcessorError(Exception):
 
 
 class TEEProcessor:
-    """TEE核心处理器"""
+    """
+    TEE处理器
+    负责安全地处理加密的用户特征数据
+    """
     
-    def __init__(self):
-        """初始化TEE处理器"""
+    def __init__(self, config: Dict):
+        """
+        初始化TEE处理器
+        
+        Args:
+            config: 处理器配置
+        """
+        self.config = config
         self.logger = logging.getLogger(__name__)
         self.crypto_engine = None
         self.feature_manager = None
         self.rba_engine = None
         self.db_manager = None
-        self.memory_monitor = None
+        self.memory_monitor = MemoryMonitor(config.get('memory', {}))
         
         # 初始化标志
         self._initialized = False
@@ -42,6 +54,16 @@ class TEEProcessor:
             'failed_requests': 0,
             'start_time': time.time()
         }
+        
+        # 获取各个组件
+        try:
+            self.crypto_engine = get_sm_crypto_engine()
+            self.feature_manager = get_feature_manager()
+            self.rba_engine = get_rba_engine()
+        except Exception as e:
+            raise TEEProcessorError(f"Failed to initialize TEE processor components: {e}")
+        
+        self.logger.info("TEE processor initialized with SM algorithms")
     
     def initialize(self):
         """初始化所有组件"""
@@ -49,25 +71,9 @@ class TEEProcessor:
             # 获取所有配置
             all_configs = get_all_configs()
             
-            # 初始化加密引擎
-            self.logger.info("Initializing crypto engine...")
-            self.crypto_engine = initialize_crypto_engine(all_configs['security'])
-            
-            # 初始化特征管理器
-            self.logger.info("Initializing feature manager...")
-            self.feature_manager = initialize_feature_manager(all_configs['features'])
-            
-            # 初始化RBA引擎
-            self.logger.info("Initializing RBA engine...")
-            self.rba_engine = initialize_rba_engine(all_configs['features'])
-            
             # 初始化数据库管理器
             self.logger.info("Initializing database manager...")
             self.db_manager = initialize_database(all_configs)
-            
-            # 初始化内存监控器
-            self.logger.info("Initializing memory monitor...")
-            self.memory_monitor = initialize_memory_monitor(all_configs['security'])
             
             self._initialized = True
             self.logger.info("TEE processor initialized successfully")
@@ -76,266 +82,275 @@ class TEEProcessor:
             self.logger.error(f"Failed to initialize TEE processor: {e}")
             raise TEEProcessorError(f"Failed to initialize TEE processor: {e}")
     
-    def process_request(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
+    def process_encrypted_message(self, encrypted_message: Dict[str, Any]) -> Dict[str, Any]:
         """
-        处理TEE请求
+        处理加密消息的主要接口
         
         Args:
-            request_data: 请求数据
+            encrypted_message: 包含加密特征数据的消息
+            
+        Returns:
+            处理结果，包含风险评估和特征分析
+        """
+        start_time = datetime.now(timezone.utc)
+        request_id = encrypted_message.get('request_id', f"req_{int(start_time.timestamp())}")
+        
+        self.logger.info(f"🔒 Processing encrypted message: {request_id}")
+        
+        try:
+            # 1. 解密用户特征数据
+            encrypted_features = encrypted_message.get('encrypted_features')
+            if not encrypted_features:
+                raise TEEProcessorError("No encrypted features found in message")
+            
+            self.logger.info("📥 Decrypting user features...")
+            decrypted_features = self.crypto_engine.decrypt_features(encrypted_features)
+            self.logger.info(f"✅ Successfully decrypted {len(decrypted_features)} features")
+            
+            # 2. 验证和清理解密的特征数据
+            validated_features = self._validate_features(decrypted_features)
+            
+            # 3. 特征处理和分析
+            self.logger.info("🔍 Processing features...")
+            feature_analysis = self.feature_manager.process_features(validated_features)
+            
+            # 4. 风险评估
+            self.logger.info("⚠️  Conducting risk assessment...")
+            risk_context = {
+                'timestamp': start_time.isoformat(),
+                'request_id': request_id,
+                'source_ip': encrypted_message.get('source_ip', 'unknown'),
+                'user_agent': encrypted_message.get('user_agent', 'unknown')
+            }
+            
+            risk_assessment = self.rba_engine.assess_risk(
+                validated_features, 
+                risk_context
+            )
+            
+            # 5. 生成处理结果
+            processing_result = {
+                'request_id': request_id,
+                'timestamp': start_time.isoformat(),
+                'processing_time_ms': (datetime.now(timezone.utc) - start_time).total_seconds() * 1000,
+                'status': 'success',
+                'feature_count': len(validated_features),
+                'feature_analysis': feature_analysis,
+                'risk_assessment': risk_assessment,
+                'memory_usage': self.memory_monitor.get_memory_info()
+            }
+            
+            # 6. 对结果进行数字签名
+            signature = self.crypto_engine.sign_data(processing_result)
+            processing_result['digital_signature'] = signature
+            processing_result['signature_algorithm'] = 'SM2'
+            
+            # 7. 安全清理敏感数据
+            self._secure_cleanup(decrypted_features, validated_features)
+            
+            self.logger.info(f"✅ Successfully processed encrypted message: {request_id}")
+            return processing_result
+            
+        except SMCryptoError as e:
+            self.logger.error(f"❌ Cryptographic error: {e}")
+            return self._generate_error_response(request_id, f"Cryptographic error: {e}", start_time)
+        
+        except Exception as e:
+            self.logger.error(f"❌ Processing error: {e}")
+            return self._generate_error_response(request_id, f"Processing error: {e}", start_time)
+    
+    def process_plaintext_features(self, features: Dict[str, Any], context: Optional[Dict] = None) -> Dict[str, Any]:
+        """
+        处理明文特征数据（向后兼容）
+        
+        Args:
+            features: 明文特征数据
+            context: 请求上下文
             
         Returns:
             处理结果
         """
-        if not self._initialized:
-            raise TEEProcessorError("TEE processor not initialized")
+        start_time = datetime.now(timezone.utc)
+        request_id = f"plaintext_req_{int(start_time.timestamp())}"
         
-        request_start_time = time.time()
-        self.stats['total_requests'] += 1
+        self.logger.info(f"🔓 Processing plaintext features: {request_id}")
         
         try:
-            # 1. 预处理和验证
-            validated_data = self._preprocess_request(request_data)
+            # 1. 验证和清理特征数据
+            validated_features = self._validate_features(features)
             
-            # 2. 特征处理
-            processed_features = self._process_features(validated_data['features'])
+            # 2. 特征处理和分析
+            feature_analysis = self.feature_manager.process_features(validated_features)
             
-            # 3. 加密特征数据
-            encrypted_features = self._encrypt_features(processed_features)
+            # 3. 风险评估
+            risk_context = context or {}
+            risk_context.update({
+                'timestamp': start_time.isoformat(),
+                'request_id': request_id
+            })
             
-            # 4. 获取历史数据和统计信息
-            user_id = validated_data['user_id']
-            user_history, global_stats = self._get_historical_data(user_id)
+            risk_assessment = self.rba_engine.assess_risk(validated_features, risk_context)
             
-            # 5. 计算风险分数
-            risk_result = self._calculate_risk(
-                user_id, processed_features, user_history, global_stats
-            )
-            
-            # 6. 存储结果
-            storage_result = self._store_results(
-                user_id, encrypted_features, risk_result, validated_data.get('metadata')
-            )
-            
-            # 7. 清理敏感数据
-            self._secure_cleanup(processed_features)
-            
-            # 8. 准备响应
-            response = self._prepare_response(risk_result, storage_result)
-            
-            # 更新统计
-            self.stats['successful_requests'] += 1
-            processing_time = time.time() - request_start_time
-            
-            self.logger.info(f"Request processed successfully for user {user_id} "
-                           f"in {processing_time:.3f}s, risk: {risk_result['risk_score']:.3f}")
-            
-            return response
-            
-        except Exception as e:
-            self.stats['failed_requests'] += 1
-            self.logger.error(f"Request processing failed: {e}")
-            
-            # 在异常情况下也要清理内存
-            self._emergency_cleanup()
-            
-            raise TEEProcessorError(f"Request processing failed: {e}")
-    
-    def _preprocess_request(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
-        """预处理和验证请求数据"""
-        try:
-            # 基本结构验证
-            required_fields = ['user_id', 'features']
-            for field in required_fields:
-                if field not in request_data:
-                    raise ValidationError(f"Missing required field: {field}")
-            
-            # 特征数据验证
-            features = request_data['features']
-            if not isinstance(features, dict) or not features:
-                raise ValidationError("Features must be a non-empty dictionary")
-            
-            # 使用特征管理器验证
-            self.feature_manager.validate_features(features)
-            
-            return {
-                'user_id': str(request_data['user_id']),
-                'features': features,
-                'metadata': request_data.get('metadata', {}),
-                'timestamp': time.time()
+            # 4. 生成处理结果
+            processing_result = {
+                'request_id': request_id,
+                'timestamp': start_time.isoformat(),
+                'processing_time_ms': (datetime.now(timezone.utc) - start_time).total_seconds() * 1000,
+                'status': 'success',
+                'feature_count': len(validated_features),
+                'feature_analysis': feature_analysis,
+                'risk_assessment': risk_assessment,
+                'memory_usage': self.memory_monitor.get_memory_info()
             }
             
-        except (ValidationError, FeatureManagerError) as e:
-            raise TEEProcessorError(f"Request validation failed: {e}")
-    
-    def _process_features(self, features: Dict[str, Any]) -> Dict[str, Any]:
-        """处理特征数据"""
-        try:
-            # 使用特征管理器处理
-            processed_features = self.feature_manager.process_features(features)
+            # 5. 数字签名
+            signature = self.crypto_engine.sign_data(processing_result)
+            processing_result['digital_signature'] = signature
+            processing_result['signature_algorithm'] = 'SM2'
             
-            # 提取特征元数据
-            feature_metadata = self.feature_manager.extract_feature_metadata(processed_features)
-            
-            # 添加元数据到处理结果
-            processed_features['_metadata'] = feature_metadata
-            
-            return processed_features
-            
-        except FeatureManagerError as e:
-            raise TEEProcessorError(f"Feature processing failed: {e}")
-    
-    def _encrypt_features(self, features: Dict[str, Any]) -> Dict[str, Any]:
-        """加密特征数据"""
-        try:
-            # 分离元数据（不加密）
-            metadata = features.pop('_metadata', {})
-            
-            # 加密特征数据
-            encrypted_features = self.crypto_engine.encrypt_features(features)
-            
-            # 添加元数据
-            encrypted_features['_metadata'] = metadata
-            
-            return encrypted_features
-            
-        except CryptoError as e:
-            raise TEEProcessorError(f"Feature encryption failed: {e}")
-    
-    def _get_historical_data(self, user_id: str) -> Tuple[List[Dict], Dict[str, Any]]:
-        """获取历史数据和统计信息"""
-        try:
-            # 获取用户历史记录
-            user_history = self.db_manager.get_user_history(user_id, limit=50)
-            
-            # 解密历史记录中的特征数据
-            decrypted_history = []
-            for record in user_history:
-                if 'features' in record and record['features']:
-                    try:
-                        # 分离元数据
-                        encrypted_features = record['features'].copy()
-                        metadata = encrypted_features.pop('_metadata', {})
-                        
-                        # 解密特征数据
-                        decrypted_features = self.crypto_engine.decrypt_features(encrypted_features)
-                        
-                        # 创建解密后的记录
-                        decrypted_record = record.copy()
-                        decrypted_record['features'] = decrypted_features
-                        decrypted_record['features']['_metadata'] = metadata
-                        
-                        decrypted_history.append(decrypted_record)
-                        
-                    except Exception as e:
-                        self.logger.warning(f"Failed to decrypt historical record {record.get('id')}: {e}")
-                        continue
-            
-            # 获取全局统计信息
-            global_stats = self.db_manager.get_global_statistics()
-            
-            return decrypted_history, global_stats
-            
-        except DatabaseError as e:
-            raise TEEProcessorError(f"Failed to get historical data: {e}")
-    
-    def _calculate_risk(self, user_id: str, features: Dict[str, Any],
-                       user_history: List[Dict], global_stats: Dict[str, Any]) -> Dict[str, Any]:
-        """计算风险分数"""
-        try:
-            # 获取特征权重
-            feature_weights = self.feature_manager.get_feature_weights()
-            
-            # 移除元数据
-            clean_features = {k: v for k, v in features.items() if k != '_metadata'}
-            
-            # 计算风险分数
-            risk_result = self.rba_engine.calculate_risk_score(
-                user_id, clean_features, feature_weights, global_stats, user_history
-            )
-            
-            return risk_result
-            
-        except RBACalculationError as e:
-            raise TEEProcessorError(f"Risk calculation failed: {e}")
-    
-    def _store_results(self, user_id: str, encrypted_features: Dict[str, Any],
-                      risk_result: Dict[str, Any], metadata: Optional[Dict]) -> Dict[str, Any]:
-        """存储结果到数据库"""
-        try:
-            # 存储风险日志
-            record_id = self.db_manager.store_risk_log(
-                user_id=user_id,
-                encrypted_features=encrypted_features,
-                risk_score=risk_result['risk_score'],
-                action=risk_result['action'],
-                metadata=metadata
-            )
-            
-            # 更新特征历史统计
-            clean_features = {k: v for k, v in encrypted_features.items() if k != '_metadata'}
-            for feature_name, encrypted_data in clean_features.items():
-                if isinstance(encrypted_data, dict):
-                    # 计算特征值哈希用于统计
-                    feature_hash = self.crypto_engine.hash_feature_value(
-                        encrypted_data, feature_name
-                    )
-                    self.db_manager.update_feature_history(feature_name, feature_hash)
-            
-            return {
-                'stored': True,
-                'record_id': record_id,
-                'timestamp': time.time()
-            }
-            
-        except DatabaseError as e:
-            self.logger.error(f"Failed to store results: {e}")
-            return {
-                'stored': False,
-                'error': str(e),
-                'timestamp': time.time()
-            }
-    
-    def _secure_cleanup(self, sensitive_data: Any):
-        """安全清理敏感数据"""
-        try:
-            # 使用加密引擎的安全删除功能
-            self.crypto_engine.secure_delete(sensitive_data)
-            
-            # 强制垃圾回收
-            gc.collect()
+            self.logger.info(f"✅ Successfully processed plaintext features: {request_id}")
+            return processing_result
             
         except Exception as e:
-            self.logger.warning(f"Secure cleanup warning: {e}")
+            self.logger.error(f"❌ Processing error: {e}")
+            return self._generate_error_response(request_id, f"Processing error: {e}", start_time)
     
-    def _emergency_cleanup(self):
-        """紧急清理（异常情况下）"""
-        try:
-            # 清理内存
-            cleanup_memory()
+    def encrypt_response(self, response_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        加密响应数据
+        
+        Args:
+            response_data: 响应数据
             
-            # 强制垃圾回收
-            gc.collect()
+        Returns:
+            加密后的响应
+        """
+        try:
+            encrypted_response = self.crypto_engine.encrypt_data(
+                response_data, 
+                key_purpose="response"
+            )
+            
+            return {
+                'encrypted_response': encrypted_response,
+                'encryption_info': {
+                    'algorithm': 'SM4-ECB',
+                    'key_derivation': 'SM3-HKDF',
+                    'signature': 'SM2',
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+            }
             
         except Exception as e:
-            self.logger.error(f"Emergency cleanup failed: {e}")
+            raise TEEProcessorError(f"Failed to encrypt response: {e}")
     
-    def _prepare_response(self, risk_result: Dict[str, Any], 
-                         storage_result: Dict[str, Any]) -> Dict[str, Any]:
-        """准备响应数据"""
-        response = {
-            'risk_score': risk_result['risk_score'],
-            'action': risk_result['action'],
-            'stored': storage_result['stored'],
-            'timestamp': time.time()
+    def decrypt_request(self, encrypted_request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        解密请求数据
+        
+        Args:
+            encrypted_request: 加密的请求数据
+            
+        Returns:
+            解密后的请求数据
+        """
+        try:
+            if 'encrypted_data' in encrypted_request:
+                decrypted_data = self.crypto_engine.decrypt_data(encrypted_request['encrypted_data'])
+                return decrypted_data
+            else:
+                raise TEEProcessorError("No encrypted data found in request")
+                
+        except Exception as e:
+            raise TEEProcessorError(f"Failed to decrypt request: {e}")
+    
+    def _validate_features(self, features: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        验证和清理特征数据
+        
+        Args:
+            features: 原始特征数据
+            
+        Returns:
+            验证后的特征数据
+        """
+        validated = {}
+        
+        for feature_name, feature_value in features.items():
+            if feature_value is None:
+                self.logger.warning(f"Skipping null feature: {feature_name}")
+                continue
+                
+            # 基本验证
+            if isinstance(feature_name, str) and len(feature_name) > 0:
+                # 清理特征名称
+                clean_name = feature_name.strip()
+                if clean_name:
+                    validated[clean_name] = feature_value
+                    
+        if not validated:
+            raise TEEProcessorError("No valid features found after validation")
+            
+        self.logger.info(f"Validated {len(validated)} features")
+        return validated
+    
+    def _secure_cleanup(self, *data_objects):
+        """
+        安全清理敏感数据
+        
+        Args:
+            *data_objects: 要清理的数据对象
+        """
+        for data in data_objects:
+            if data:
+                self.crypto_engine.secure_delete(data)
+    
+    def _generate_error_response(self, request_id: str, error_message: str, start_time: datetime) -> Dict[str, Any]:
+        """
+        生成错误响应
+        
+        Args:
+            request_id: 请求ID
+            error_message: 错误消息
+            start_time: 开始时间
+            
+        Returns:
+            错误响应
+        """
+        error_response = {
+            'request_id': request_id,
+            'timestamp': start_time.isoformat(),
+            'processing_time_ms': (datetime.now(timezone.utc) - start_time).total_seconds() * 1000,
+            'status': 'error',
+            'error': error_message,
+            'memory_usage': self.memory_monitor.get_memory_info()
         }
         
-        # 添加存储信息
-        if storage_result['stored']:
-            response['record_id'] = storage_result.get('record_id')
-        else:
-            response['storage_error'] = storage_result.get('error')
-        
-        return response
+        # 即使是错误响应也要签名
+        try:
+            signature = self.crypto_engine.sign_data(error_response)
+            error_response['digital_signature'] = signature
+            error_response['signature_algorithm'] = 'SM2'
+        except Exception:
+            pass  # 签名失败不应该阻止错误响应
+            
+        return error_response
+    
+    def get_processor_info(self) -> Dict[str, Any]:
+        """获取处理器信息"""
+        return {
+            'processor_version': '2.0.0-SM',
+            'algorithms': self.crypto_engine.get_algorithm_info(),
+            'features_supported': self.feature_manager.get_supported_features(),
+            'memory_info': self.memory_monitor.get_memory_info(),
+            'processing_capabilities': {
+                'encrypted_input': True,
+                'plaintext_input': True,
+                'encrypted_output': True,
+                'digital_signature': True,
+                'real_time_processing': True
+            }
+        }
     
     def get_status(self) -> Dict[str, Any]:
         """获取TEE处理器状态"""
@@ -393,24 +408,27 @@ class TEEProcessor:
 
 
 # 全局TEE处理器实例
-tee_processor = None
+_tee_processor: Optional[TEEProcessor] = None
 
 
-def initialize_tee_processor() -> TEEProcessor:
+def initialize_tee_processor(config: Dict) -> TEEProcessor:
     """
     初始化TEE处理器
     
+    Args:
+        config: 处理器配置
+        
     Returns:
         TEE处理器实例
     """
-    global tee_processor
-    tee_processor = TEEProcessor()
-    tee_processor.initialize()
-    return tee_processor
+    global _tee_processor
+    _tee_processor = TEEProcessor(config)
+    _tee_processor.initialize()
+    return _tee_processor
 
 
 def get_tee_processor() -> TEEProcessor:
     """获取TEE处理器实例"""
-    if tee_processor is None:
+    if _tee_processor is None:
         raise TEEProcessorError("TEE processor not initialized")
-    return tee_processor 
+    return _tee_processor 
