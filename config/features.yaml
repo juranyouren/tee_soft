@@ -1,0 +1,63 @@
+# TEE软件特征配置文件
+features:
+  ip:
+    type: string
+    required: true
+    weight: 0.4
+    encryption: aes-256-gcm
+    validation: ipv4_or_ipv6
+    description: "用户IP地址"
+    
+  user_agent:
+    type: string
+    required: true
+    weight: 0.3
+    encryption: aes-256-gcm
+    validation: non_empty_string
+    description: "浏览器用户代理字符串"
+    
+  rtt:
+    type: float
+    required: false
+    weight: 0.2
+    encryption: aes-256-gcm
+    validation: positive_number
+    range: [0, 10000]
+    description: "往返时间(毫秒)"
+    
+  geo_location:
+    type: string
+    required: false
+    weight: 0.1
+    encryption: aes-256-gcm
+    validation: geo_coordinates
+    description: "地理位置坐标"
+    
+  device_fingerprint:
+    type: string
+    required: false
+    weight: 0.1
+    encryption: aes-256-gcm
+    validation: non_empty_string
+    description: "设备指纹"
+
+# 风险计算配置
+risk_calculation:
+  algorithm: bayesian
+  thresholds:
+    reject: 0.7
+    challenge: 0.4
+    allow: 0.0
+  
+  # 贝叶斯模型参数
+  bayesian_params:
+    smoothing_factor: 0.01
+    prior_malicious: 0.1
+    prior_benign: 0.9
+
+# 恶意特征配置
+malicious_indicators:
+  countries: ["CN", "RU", "KP"]
+  asn_ranges: ["AS1234", "AS5678"]
+  suspicious_uas: ["bot", "crawler", "spider"]
+  high_risk_rtt: 1000 

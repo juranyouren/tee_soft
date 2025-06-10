@@ -1,0 +1,55 @@
+# 数据库配置文件
+database:
+  # MySQL连接配置
+  mysql:
+    host: "localhost"
+    port: 3306
+    database: "risk_assessment"
+    user: "tee_user"
+    password_env: "DB_PASSWORD"  # 从环境变量读取
+    charset: "utf8mb4"
+    
+  # 连接池配置
+  pool:
+    max_connections: 10
+    min_connections: 2
+    connection_timeout: 30
+    idle_timeout: 300
+    
+  # 表结构配置
+  tables:
+    risk_logs:
+      name: "risk_logs"
+      columns:
+        id: "INT AUTO_INCREMENT PRIMARY KEY"
+        user_id: "VARCHAR(36) NOT NULL"
+        features: "JSON NOT NULL"
+        risk_score: "FLOAT"
+        action: "VARCHAR(50)"
+        created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        feature_hash: "VARCHAR(64)"
+      indexes:
+        - "INDEX idx_user (user_id)"
+        - "INDEX idx_created (created_at)"
+        - "INDEX idx_feature_hash (feature_hash)"
+        
+    feature_history:
+      name: "feature_history"
+      columns:
+        id: "INT AUTO_INCREMENT PRIMARY KEY"
+        feature_name: "VARCHAR(100) NOT NULL"
+        feature_value_hash: "VARCHAR(64) NOT NULL"
+        occurrence_count: "INT DEFAULT 1"
+        last_seen: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+      indexes:
+        - "UNIQUE KEY unique_feature (feature_name, feature_value_hash)"
+        - "INDEX idx_last_seen (last_seen)"
+
+# Redis缓存配置（可选）
+cache:
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 0
+    password_env: "REDIS_PASSWORD"
+    ttl: 3600  # 1小时过期 

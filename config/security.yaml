@@ -1,0 +1,49 @@
+# TEE安全配置文件
+encryption:
+  # 数据加密配置
+  algorithm: aes-256-gcm
+  key_size: 32  # 256 bits
+  nonce_size: 12  # 96 bits for GCM
+  tag_size: 16   # 128 bits
+  
+  # 密钥派生配置
+  key_derivation:
+    algorithm: hkdf-sha256
+    salt_size: 32
+    iterations: 100000
+    
+  # 数字签名配置
+  signature:
+    algorithm: ed25519
+    key_size: 32
+
+# TEE环境配置
+tee:
+  memory_limit: 134217728  # 128MB
+  secure_memory: true
+  memory_encryption: true
+  
+  # 内存监控配置
+  memory_monitor:
+    interval: 5  # 秒
+    alert_threshold: 0.8  # 80%使用率报警
+    cleanup_threshold: 0.9  # 90%使用率强制清理
+
+# 密钥管理配置
+key_management:
+  master_key_env: "TEE_MASTER_KEY"
+  key_rotation_hours: 24
+  backup_keys_count: 3
+  
+  # 密钥存储
+  storage:
+    type: memory  # memory, file, hsm
+    secure_delete: true
+
+# 审计日志配置
+audit:
+  enabled: true
+  log_level: INFO
+  log_file: "logs/tee_audit.log"
+  log_rotation: daily
+  sensitive_data_masking: true 
