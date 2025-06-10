@@ -336,14 +336,20 @@ class CryptoEngine:
         Returns:
             公钥信息
         """
-        public_key_bytes = self.verify_key.public_key_bytes(
+        public_key_bytes = self.verify_key.public_bytes(
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw
         )
         
+        public_key_pem = self.verify_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode('utf-8')
+        
         return {
             'algorithm': 'Ed25519',
             'public_key': public_key_bytes.hex(),
+            'public_key_pem': public_key_pem,
             'key_size': len(public_key_bytes) * 8
         }
 
