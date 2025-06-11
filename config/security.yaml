@@ -1,49 +1,156 @@
-# TEE安全配置文件
-encryption:
-  # 数据加密配置
-  algorithm: aes-256-gcm
-  key_size: 32  # 256 bits
-  nonce_size: 12  # 96 bits for GCM
-  tag_size: 16   # 128 bits
-  
-  # 密钥派生配置
-  key_derivation:
-    algorithm: hkdf-sha256
-    salt_size: 32
-    iterations: 100000
-    
-  # 数字签名配置
-  signature:
-    algorithm: ed25519
-    key_size: 32
+# TEE_SOFT 安全配置 - 改进版密钥管理
+# 支持密钥分离和混合加密架构
 
-# TEE环境配置
+# 🔐 通信加密配置 (客户端-TEE)
+communication_encryption:
+  # TEE长期密钥对配置
+  tee_keypair:
+    algorithm: sm2  # SM2椭圆曲线密钥对
+    curve: sm2p256v1
+    key_generation: auto
+    private_key_storage: memory_only  # 私钥仅存储在内存中
+    public_key_distribution: embedded_in_client  # 公钥内置在客户端
+  
+  # 会话密钥配置
+  session_key:
+    algorithm: sm4  # SM4对称加密
+    key_size: 16  # 128位
+    generation: per_request  # 每次请求生成新密钥
+    lifetime: single_use  # 单次使用后销毁
+    secure_deletion: immediate  # 立即安全删除
+
+# 🗄️ 数据库加密配置 (完全独立)
+database_encryption:
+  # 数据库独立加密
+  algorithm: sm4-ecb
+  key_size: 16  # 128位SM4密钥
+  hash_algorithm: sm3  # SM3完整性校验
+  
+  # 数据库密钥管理
+  key_management:
+    db_master_key_env: DB_MASTER_KEY  # 独立环境变量
+    key_derivation: sm3_based  # 基于SM3的密钥派生
+    purpose_separation: true  # 不同用途使用不同密钥
+    key_rotation_days: 90  # 密钥轮换周期
+    
+    # 支持的存储用途
+    storage_purposes:
+      - user_data
+      - risk_logs
+      - feature_history
+      - statistics
+  
+  # 数据库完整性保护
+  integrity:
+    algorithm: sm3
+    verification: mandatory
+    failure_action: reject
+
+# 🎯 密钥隔离保证
+key_isolation:
+  communication_db_separation: true  # 通信与数据库密钥完全分离
+  forward_secrecy: true  # 前向安全性
+  backward_secrecy: true  # 后向安全性
+  cross_contamination_prevention: true  # 防止密钥交叉污染
+
+# 📊 数字签名配置
+digital_signature:
+  algorithm: sm2
+  curve: sm2p256v1
+  hash_algorithm: sm3
+  signing_context: response_authentication
+
+# 🛡️ TEE环境配置
 tee:
   memory_limit: 134217728  # 128MB
   secure_memory: true
-  memory_encryption: true
+  key_material_isolation: true
   
   # 内存监控配置
   memory_monitor:
-    interval: 5  # 秒
-    alert_threshold: 0.8  # 80%使用率报警
-    cleanup_threshold: 0.9  # 90%使用率强制清理
-
-# 密钥管理配置
-key_management:
-  master_key_env: "TEE_MASTER_KEY"
-  key_rotation_hours: 24
-  backup_keys_count: 3
+    interval: 5
+    alert_threshold: 0.8
+    cleanup_threshold: 0.9
+    force_cleanup_on_session_end: true
   
-  # 密钥存储
-  storage:
-    type: memory  # memory, file, hsm
-    secure_delete: true
+  # 安全清理配置
+  secure_cleanup:
+    session_keys: immediate
+    plaintext_features: immediate
+    temporary_data: immediate
+    method: cryptographic_erasure
 
-# 审计日志配置
-audit:
-  enabled: true
-  log_level: INFO
-  log_file: "logs/tee_audit.log"
-  log_rotation: daily
-  sensitive_data_masking: true 
+# 🔒 加密操作配置
+encryption_operations:
+  # 客户端加密流程
+  client_flow:
+    step1: generate_session_key
+    step2: encrypt_features_with_session_key
+    step3: encrypt_session_key_with_tee_public_key
+    step4: send_encrypted_message
+  
+  # TEE解密流程
+  tee_flow:
+    step1: decrypt_session_key_with_tee_private_key
+    step2: decrypt_features_with_session_key
+    step3: process_features_in_secure_memory
+    step4: encrypt_for_database_with_independent_key
+    step5: secure_delete_session_data
+
+# ⚡ 性能优化配置
+performance:
+  session_key_cache: false  # 不缓存会话密钥
+  batch_encryption: true
+  hardware_acceleration: true
+  parallel_processing: true
+
+# 📈 安全监控配置
+security_monitoring:
+  key_usage_audit: true
+  encryption_performance_tracking: true
+  security_violations_detection: true
+  
+  # 告警配置
+  alerts:
+    key_reuse_detection: error
+    unusual_encryption_patterns: warning
+    performance_anomalies: info
+    integrity_failures: critical
+
+# 🔧 兼容性配置
+compatibility:
+  # 向后兼容传统加密
+  legacy_support:
+    aes_256_gcm: true
+    ed25519: true
+    sha256: true
+  
+  # 国密算法优先
+  algorithm_priority:
+    - sm4
+    - sm2
+    - sm3
+    - aes-256-gcm  # 备用
+    - ed25519     # 备用
+    - sha256      # 备用
+
+# 🌍 合规性配置
+compliance:
+  national_crypto_standards: true
+  standards:
+    - "GB/T 32907-2016"  # SM4
+    - "GB/T 32905-2016"  # SM3
+    - "GB/T 32918-2016"  # SM2
+  commercial_crypto_level: true
+
+# 🚨 应急配置
+emergency:
+  key_compromise_response:
+    immediate_rotation: true
+    revoke_all_sessions: true
+    audit_log_enhancement: true
+  
+  system_recovery:
+    key_regeneration: automatic
+    data_integrity_check: mandatory
+    service_restoration: gradual 

@@ -1,0 +1,291 @@
+# 数据库安全配置 - 独立加密体系
+# 与通信加密完全隔离的数据库安全配置
+
+# 🔐 数据库独立加密配置
+encryption:
+  # 主要加密算法
+  algorithm: sm4-ecb
+  key_size: 16  # 128位SM4密钥
+  block_size: 16
+  
+  # 完整性保护
+  hash_algorithm: sm3
+  integrity_check: mandatory
+  
+  # 加密模式
+  mode: ecb  # ECB模式（数据库场景）
+  padding: pkcs7
+
+# 🗝️ 独立密钥管理
+key_management:
+  # 数据库主密钥
+  db_master_key_env: DB_MASTER_KEY
+  master_key_size: 16  # 128位
+  
+  # 密钥派生配置
+  key_derivation:
+    algorithm: sm3_based_hkdf
+    derive_function: sm3_hash
+    salt_source: purpose_based
+    
+    # 密钥派生层次
+    hierarchy:
+      level1: db_master_key
+      level2: purpose_specific_key
+      level3: feature_specific_key
+  
+  # 支持的存储用途
+  storage_purposes:
+    user_data:
+      description: "用户基础数据"
+      key_suffix: "user_data"
+      retention_days: 365
+    
+    risk_logs:
+      description: "风险评估日志"
+      key_suffix: "risk_logs"
+      retention_days: 730
+    
+    feature_history:
+      description: "特征历史记录"
+      key_suffix: "feature_history"
+      retention_days: 90
+    
+    statistics:
+      description: "统计数据"
+      key_suffix: "statistics"
+      retention_days: 1095
+    
+    user_feature_device_fingerprint:
+      description: "设备指纹特征"
+      key_suffix: "device_fingerprint"
+      retention_days: 180
+    
+    user_feature_login_location:
+      description: "登录位置特征"
+      key_suffix: "login_location"
+      retention_days: 180
+    
+    user_feature_behavior_pattern:
+      description: "行为模式特征"
+      key_suffix: "behavior_pattern"
+      retention_days: 90
+  
+  # 密钥轮换配置
+  key_rotation:
+    enabled: true
+    rotation_days: 90
+    advance_notice_days: 7
+    overlap_period_days: 1
+    backup_count: 3
+
+# 🛡️ 数据库安全策略
+security_policies:
+  # 数据分类
+  data_classification:
+    highly_sensitive: 
+      - user_credentials
+      - personal_identifiers
+      - financial_data
+    
+    sensitive:
+      - user_features
+      - risk_scores
+      - behavioral_data
+    
+    internal:
+      - system_logs
+      - performance_metrics
+      - configuration_data
+  
+  # 加密要求
+  encryption_requirements:
+    highly_sensitive: mandatory
+    sensitive: mandatory
+    internal: optional
+  
+  # 访问控制
+  access_control:
+    encryption_key_access: tee_only
+    decryption_authority: authorized_processes
+    audit_requirements: comprehensive
+
+# 🔒 数据完整性配置
+integrity:
+  # 完整性算法
+  algorithm: sm3
+  verification_level: per_record
+  
+  # 完整性保护
+  protection:
+    hash_with_key: true
+    timestamp_inclusion: true
+    version_tracking: true
+  
+  # 完整性失败处理
+  failure_handling:
+    action: reject_and_log
+    escalation: security_team
+    recovery: automatic_retry
+
+# 📦 数据库表加密配置
+table_encryption:
+  # 风险日志表
+  risk_logs:
+    encryption_level: full
+    key_purpose: risk_logs
+    integrity_check: per_row
+    columns:
+      encrypted_features: encrypted_blob
+      risk_score: encrypted_decimal
+      metadata: encrypted_json
+  
+  # 用户特征表（如果存在）
+  user_features:
+    encryption_level: full
+    key_purpose: user_data
+    integrity_check: per_row
+    columns:
+      feature_data: encrypted_blob
+      feature_hash: integrity_hash
+  
+  # 统计数据表
+  statistics:
+    encryption_level: selective
+    key_purpose: statistics
+    integrity_check: per_table
+    columns:
+      sensitive_stats: encrypted_blob
+      public_stats: plaintext
+
+# 🔧 数据库操作配置
+operations:
+  # 加密操作
+  encryption:
+    batch_size: 1000
+    parallel_threads: 4
+    memory_limit: 64MB
+    timeout_seconds: 30
+  
+  # 解密操作
+  decryption:
+    cache_policy: no_cache
+    memory_cleanup: immediate
+    access_logging: mandatory
+  
+  # 密钥操作
+  key_operations:
+    derivation_cache_ttl: 0  # 不缓存派生密钥
+    secure_deletion: immediate
+    operation_logging: detailed
+
+# 📊 性能优化配置
+performance:
+  # 加密性能
+  encryption_optimization:
+    hardware_acceleration: true
+    parallel_processing: true
+    memory_optimization: true
+  
+  # 数据库性能
+  database_optimization:
+    connection_pooling: true
+    prepared_statements: true
+    batch_operations: true
+  
+  # 监控配置
+  monitoring:
+    encryption_latency: enabled
+    throughput_tracking: enabled
+    error_rate_monitoring: enabled
+
+# 🚨 安全监控配置
+security_monitoring:
+  # 加密监控
+  encryption_monitoring:
+    key_usage_tracking: true
+    encryption_patterns: true
+    anomaly_detection: true
+  
+  # 数据库安全监控
+  database_monitoring:
+    unauthorized_access: alert
+    integrity_violations: critical
+    performance_anomalies: warning
+  
+  # 审计日志
+  audit_logging:
+    encryption_operations: detailed
+    key_operations: comprehensive
+    data_access: selective
+    
+    # 日志保留
+    retention:
+      encryption_logs: 1_year
+      key_logs: 2_years
+      access_logs: 90_days
+
+# 🌐 合规性配置
+compliance:
+  # 国密标准合规
+  national_standards:
+    sm4_compliance: true
+    sm3_compliance: true
+    commercial_crypto_level: true
+  
+  # 数据保护合规
+  data_protection:
+    encryption_at_rest: mandatory
+    key_isolation: enforced
+    access_control: strict
+  
+  # 审计要求
+  audit_requirements:
+    encryption_audit: comprehensive
+    key_management_audit: detailed
+    compliance_reporting: quarterly
+
+# 🔄 备份和恢复配置
+backup_recovery:
+  # 加密备份
+  backup_encryption:
+    algorithm: sm4-ecb
+    key_source: independent
+    integrity_protection: true
+  
+  # 密钥备份
+  key_backup:
+    encryption: true
+    location: secure_storage
+    access_control: multi_factor
+  
+  # 恢复配置
+  recovery:
+    key_recovery: automated
+    data_verification: mandatory
+    rollback_capability: true
+
+# 🚀 部署配置
+deployment:
+  # 环境配置
+  environments:
+    development:
+      encryption_level: basic
+      key_rotation: disabled
+      monitoring: minimal
+    
+    staging:
+      encryption_level: full
+      key_rotation: weekly
+      monitoring: standard
+    
+    production:
+      encryption_level: maximum
+      key_rotation: monthly
+      monitoring: comprehensive
+  
+  # 初始化配置
+  initialization:
+    key_generation: automatic
+    security_validation: mandatory
+    performance_testing: required 

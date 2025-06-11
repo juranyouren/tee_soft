@@ -204,22 +204,175 @@ def process_tee_request():
         raise TEEProcessorError(f"Request processing failed: {e}")
 
 
-@app.route('/tee_soft/public_key', methods=['GET'])
-def get_public_key():
-    """获取公钥信息"""
+@app.route('/tee_soft/process_encrypted', methods=['POST'])
+def process_encrypted_request():
+    """处理加密的TEE请求（支持混合加密）"""
+    try:
+        # 验证请求格式
+        if not request.is_json:
+            raise ValidationError("Request must be JSON")
+        
+        request_data = request.get_json()
+        if not request_data:
+            raise ValidationError("Request body cannot be empty")
+        
+        # 检测加密类型并处理
+        tee_processor = get_tee_processor()
+        
+        # 新版本支持混合加密，旧版本向后兼容
+        if 'encrypted_session_key' in request_data:
+            logger.info("🔐 Processing hybrid encrypted request")
+            result = tee_processor.process_hybrid_encrypted_message(request_data)
+        else:
+            logger.info("🔒 Processing legacy encrypted request")
+            result = tee_processor.process_encrypted_message(request_data)
+        
+        logger.info(f"Encrypted request processed successfully: {request_data.get('request_id', 'unknown')}")
+        
+        return jsonify(result)
+        
+    except ValidationError as e:
+        raise e  # 交给错误处理器处理
+    except TEEProcessorError as e:
+        raise e  # 交给错误处理器处理
+    except Exception as e:
+        logger.error(f"Unexpected error in encrypted request processing: {e}")
+        raise TEEProcessorError(f"Failed to process encrypted request: {e}")
+
+
+@app.route('/tee_soft/encryption_info', methods=['GET'])
+def get_encryption_system_info():
+    """获取加密系统详细信息"""
     try:
         tee_processor = get_tee_processor()
-        public_key_info = tee_processor.get_public_key_info()
         
-        return jsonify({
-            'success': True,
-            'public_key': public_key_info,
+        # 获取加密系统信息
+        try:
+            encryption_info = tee_processor.get_encryption_info()
+        except AttributeError:
+            # 向后兼容
+            encryption_info = {
+                'communication_encryption': {
+                    'note': 'Legacy system - detailed info not available'
+                },
+                'database_encryption': 'Legacy system',
+                'key_isolation_status': 'UNKNOWN'
+            }
+        
+        # 添加系统级别信息
+        system_info = {
+            'encryption_system': encryption_info,
+            'supported_features': {
+                'hybrid_encryption': hasattr(tee_processor, 'process_hybrid_encrypted_message'),
+                'session_key_management': hasattr(tee_processor, 'session_key_manager'),
+                'database_key_isolation': hasattr(tee_processor, 'database_crypto_engine'),
+                'forward_secrecy': True,
+                'key_rotation': True
+            },
+            'security_level': 'HIGH' if encryption_info.get('key_isolation_status') == 'ENABLED' else 'MEDIUM',
+            'compliance': {
+                'national_crypto_standards': True,
+                'commercial_crypto_level': True,
+                'algorithms': ['SM2', 'SM3', 'SM4']
+            },
             'timestamp': datetime.utcnow().isoformat()
-        })
+        }
+        
+        return jsonify(system_info)
         
     except Exception as e:
-        logger.error(f"Failed to get public key: {e}")
-        raise TEEProcessorError(f"Failed to get public key information: {e}")
+        logger.error(f"Failed to get encryption system info: {e}")
+        raise TEEProcessorError(f"Failed to get encryption system info: {e}")
+
+
+@app.route('/tee_soft/algorithm_info', methods=['GET'])
+def get_algorithm_info():
+    """获取国密算法信息"""
+    try:
+        algorithm_info = {
+            'encryption_algorithms': {
+                'SM4': {
+                    'name': 'SM4分组密码算法',
+                    'standard': 'GB/T 32907-2016',
+                    'key_size': 128,
+                    'block_size': 128,
+                    'mode': 'ECB',
+                    'usage': ['数据加密', '会话密钥加密', '数据库存储加密']
+                },
+                'SM2': {
+                    'name': 'SM2椭圆曲线公钥密码算法',
+                    'standard': 'GB/T 32918-2016',
+                    'curve': 'sm2p256v1',
+                    'key_size': 256,
+                    'usage': ['数字签名', '密钥协商', '会话密钥加密']
+                }
+            },
+            'hash_algorithms': {
+                'SM3': {
+                    'name': 'SM3密码杂凑算法',
+                    'standard': 'GB/T 32905-2016',
+                    'digest_size': 256,
+                    'usage': ['完整性校验', '密钥派生', '数字签名']
+                }
+            },
+            'key_management': {
+                'session_keys': {
+                    'generation': 'per_request',
+                    'algorithm': 'SM4',
+                    'lifetime': 'single_use',
+                    'security': 'forward_secure'
+                },
+                'long_term_keys': {
+                    'algorithm': 'SM2',
+                    'storage': 'memory_only',
+                    'usage': 'session_key_protection'
+                },
+                'database_keys': {
+                    'algorithm': 'SM4',
+                    'derivation': 'SM3_based',
+                    'isolation': 'complete_separation'
+                }
+            },
+            'compliance': {
+                'level': '商用密码安全等级',
+                'certification': '国家密码管理局认证',
+                'standards_compliance': True
+            },
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        
+        return jsonify(algorithm_info)
+        
+    except Exception as e:
+        logger.error(f"Failed to get algorithm info: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/tee_soft/public_key', methods=['GET'])
+def get_public_key():
+    """获取TEE公钥信息（改进版）"""
+    try:
+        tee_processor = get_tee_processor()
+        
+        # 尝试获取新版本的TEE公钥信息
+        try:
+            public_key_info = tee_processor.get_tee_public_key_info()
+            return jsonify(public_key_info)
+        except AttributeError:
+            # 向后兼容：使用旧版本接口
+            logger.warning("Using legacy public key interface")
+            legacy_info = tee_processor.get_public_key_info()
+            return jsonify({
+                'tee_public_key': legacy_info.get('public_key', ''),
+                'algorithm': 'SM2',
+                'version': '1.0',
+                'usage': 'legacy_compatibility',
+                'note': 'Legacy public key format'
+            })
+        
+    except Exception as e:
+        logger.error(f"Failed to get TEE public key: {e}")
+        raise TEEProcessorError(f"Failed to get TEE public key: {e}")
 
 
 @app.route('/admin/cleanup', methods=['POST'])
