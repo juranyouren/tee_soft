@@ -4,9 +4,14 @@ TEE软件加密方法演示程序
 展示项目中使用的各种加密技术和安全特性
 """
 import os
+import sys
 import json
 import time
 from typing import Dict, Any
+
+# 添加父目录到Python路径，以便导入项目模块
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from core.crypto_engine import CryptoEngine
 
 
