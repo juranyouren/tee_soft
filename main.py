@@ -51,7 +51,7 @@ def initialize_application():
         
         # 初始化TEE处理器
         logger.info("Initializing TEE processor...")
-        tee_processor = initialize_tee_processor()
+        tee_processor = initialize_tee_processor(all_configs)
         logger.info("TEE processor initialized successfully")
         
         logger.info("Application initialization completed")

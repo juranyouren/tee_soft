@@ -91,16 +91,36 @@ class TEEProcessor:
             
             # 初始化传统组件
             self.logger.info("Initializing legacy crypto engine...")
+            # 首先初始化SM加密引擎
+            from .sm_crypto_engine import initialize_sm_crypto_engine
+            security_config = all_configs.get('security', {})
+            initialize_sm_crypto_engine(security_config)
             self.crypto_engine = get_sm_crypto_engine()
+            
+            # 初始化特征管理器
+            self.logger.info("Initializing feature manager...")
+            features_config = all_configs.get('features', {})
+            initialize_feature_manager(features_config)
             self.feature_manager = get_feature_manager()
+            
+            # 初始化RBA引擎
+            self.logger.info("Initializing RBA engine...")
+            initialize_rba_engine(features_config)
             self.rba_engine = get_rba_engine()
             
             # 初始化数据库管理器
             self.logger.info("Initializing database manager...")
-            self.db_manager = initialize_database(all_configs)
+            try:
+                db_config = all_configs.get('database', {})
+                self.db_manager = initialize_database(db_config)
+                self.logger.info("Database manager initialized successfully")
+            except Exception as db_error:
+                self.logger.warning(f"Database initialization failed: {db_error}")
+                self.logger.warning("Continuing without database - some features may be limited")
+                self.db_manager = None
             
             # 新增：初始化改进的密钥管理组件
-            self.logger.info("🔑 Initializing improved key management components...")
+            self.logger.info("Initializing improved key management components...")
             
             # 1. 会话密钥管理器
             comm_config = all_configs.get('security', {}).get('communication_encryption', {})
@@ -113,8 +133,8 @@ class TEEProcessor:
             
             # 生成TEE密钥对
             private_key, public_key = self.tee_keypair_manager.generate_keypair()
-            self.logger.info(f"🔐 Generated TEE keypair: {tee_keypair_algo.upper()}")
-            self.logger.info(f"📤 TEE Public Key: {public_key[:32]}...")
+            self.logger.info(f"Generated TEE keypair: {tee_keypair_algo.upper()}")
+            self.logger.info(f"TEE Public Key: {public_key[:32]}...")
             
             # 3. 数据库加密引擎
             db_crypto_config = all_configs.get('security', {}).get('database_encryption', {})
@@ -123,11 +143,11 @@ class TEEProcessor:
             self.database_crypto_engine = initialize_database_crypto_engine(db_crypto_config)
             
             self._initialized = True
-            self.logger.info("✅ TEE processor initialized successfully with improved key management")
-            self.logger.info("🔐 Key isolation: Communication ↔️ Database keys are completely separated")
+            self.logger.info("TEE processor initialized successfully with improved key management")
+            self.logger.info("Key isolation: Communication <-> Database keys are completely separated")
             
         except Exception as e:
-            self.logger.error(f"❌ Failed to initialize TEE processor: {e}")
+            self.logger.error(f"Failed to initialize TEE processor: {e}")
             raise TEEProcessorError(f"Failed to initialize TEE processor: {e}")
     
     def process_hybrid_encrypted_message(self, encrypted_message: Dict[str, Any]) -> Dict[str, Any]:
@@ -145,7 +165,7 @@ class TEEProcessor:
         start_time = datetime.now(timezone.utc)
         request_id = encrypted_message.get('request_id', f"hybrid_req_{int(start_time.timestamp())}")
         
-        self.logger.info(f"🔐 Processing hybrid encrypted message: {request_id}")
+        self.logger.info(f"Processing hybrid encrypted message: {request_id}")
         self.stats['total_requests'] += 1
         
         # 用于安全清理的临时变量
@@ -159,17 +179,17 @@ class TEEProcessor:
             if not encrypted_session_key:
                 raise TEEProcessorError("No encrypted session key found in message")
             
-            self.logger.info("🔓 Decrypting session key with TEE private key...")
+            self.logger.info("Decrypting session key with TEE private key...")
             session_key = self.tee_keypair_manager.decrypt_session_key(encrypted_session_key)
             self.stats['session_keys_processed'] += 1
-            self.logger.info("✅ Session key decrypted successfully")
+            self.logger.info("Session key decrypted successfully")
             
             # 2. 使用会话密钥解密特征数据
             encrypted_features_data = encrypted_message.get('encrypted_features')
             if not encrypted_features_data:
                 raise TEEProcessorError("No encrypted features found in message")
             
-            self.logger.info("🔍 Decrypting features with session key...")
+            self.logger.info("Decrypting features with session key...")
             
             # 支持多种特征数据格式
             if isinstance(encrypted_features_data, dict):
@@ -191,17 +211,17 @@ class TEEProcessor:
                 )
                 decrypted_features = json.loads(features_bytes.decode('utf-8'))
             
-            self.logger.info(f"✅ Successfully decrypted {len(decrypted_features)} features")
+            self.logger.info(f"Successfully decrypted {len(decrypted_features)} features")
             
             # 3. 验证和清理解密的特征数据
             validated_features = self._validate_features(decrypted_features)
             
             # 4. 特征处理和分析
-            self.logger.info("🔍 Processing features...")
+            self.logger.info("Processing features...")
             feature_analysis = self.feature_manager.process_features(validated_features)
             
             # 5. 风险评估
-            self.logger.info("⚠️  Conducting risk assessment...")
+            self.logger.info("Conducting risk assessment...")
             risk_context = {
                 'timestamp': start_time.isoformat(),
                 'request_id': request_id,
@@ -243,22 +263,22 @@ class TEEProcessor:
             processing_result['signature_algorithm'] = self.tee_keypair_manager.algorithm.upper()
             
             self.stats['successful_requests'] += 1
-            self.logger.info(f"✅ Successfully processed hybrid encrypted message: {request_id}")
+            self.logger.info(f"Successfully processed hybrid encrypted message: {request_id}")
             return processing_result
             
         except (SessionKeyError, TEEKeyPairError, DatabaseCryptoError) as e:
-            self.logger.error(f"❌ Key management error: {e}")
+            self.logger.error(f"Key management error: {e}")
             self.stats['failed_requests'] += 1
             return self._generate_error_response(request_id, f"Key management error: {e}", start_time)
         
         except Exception as e:
-            self.logger.error(f"❌ Processing error: {e}")
+            self.logger.error(f"Processing error: {e}")
             self.stats['failed_requests'] += 1
             return self._generate_error_response(request_id, f"Processing error: {e}", start_time)
         
         finally:
             # 9. 立即进行安全清理
-            self.logger.info("🧹 Performing secure cleanup...")
+            self.logger.info("Performing secure cleanup...")
             self._secure_cleanup_improved(session_key, decrypted_features, validated_features)
     
     def _store_with_database_encryption(self, features: Dict[str, Any], risk_assessment: Dict[str, Any], request_id: str) -> bool:
@@ -274,7 +294,7 @@ class TEEProcessor:
             存储是否成功
         """
         try:
-            self.logger.info("💾 Storing data with independent database encryption...")
+            self.logger.info("Storing data with independent database encryption...")
             
             # 为不同类型的数据使用不同的数据库存储密钥
             user_id = risk_assessment.get('user_id', 'anonymous')
@@ -305,14 +325,14 @@ class TEEProcessor:
                 )
                 
                 self.stats['database_encryptions'] += 1
-                self.logger.info("✅ Data successfully stored with database encryption")
+                self.logger.info("Data successfully stored with database encryption")
                 return True
             else:
-                self.logger.warning("⚠️  Database manager not available")
+                self.logger.warning("Database manager not available")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"❌ Database storage error: {e}")
+            self.logger.error(f"Database storage error: {e}")
             return False
     
     def _secure_cleanup_improved(self, *sensitive_objects):
@@ -349,41 +369,10 @@ class TEEProcessor:
             # 强制垃圾回收
             gc.collect()
             
-            self.logger.debug(f"🧹 Secure cleanup completed: {cleanup_count} objects cleaned")
+            self.logger.debug(f"Secure cleanup completed: {cleanup_count} objects cleaned")
             
         except Exception as e:
-            # 3. 风险评估
-            risk_context = context or {}
-            risk_context.update({
-                'timestamp': start_time.isoformat(),
-                'request_id': request_id
-            })
-            
-            risk_assessment = self.rba_engine.assess_risk(validated_features, risk_context)
-            
-            # 4. 生成处理结果
-            processing_result = {
-                'request_id': request_id,
-                'timestamp': start_time.isoformat(),
-                'processing_time_ms': (datetime.now(timezone.utc) - start_time).total_seconds() * 1000,
-                'status': 'success',
-                'feature_count': len(validated_features),
-                'feature_analysis': feature_analysis,
-                'risk_assessment': risk_assessment,
-                'memory_usage': self.memory_monitor.get_memory_info()
-            }
-            
-            # 5. 数字签名
-            signature = self.crypto_engine.sign_data(processing_result)
-            processing_result['digital_signature'] = signature
-            processing_result['signature_algorithm'] = 'SM2'
-            
-            self.logger.info(f"✅ Successfully processed plaintext features: {request_id}")
-            return processing_result
-            
-        except Exception as e:
-            self.logger.error(f"❌ Processing error: {e}")
-            return self._generate_error_response(request_id, f"Processing error: {e}", start_time)
+            self.logger.error(f"Secure cleanup error: {e}")
     
     def encrypt_response(self, response_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -560,19 +549,28 @@ class TEEProcessor:
     def cleanup_old_data(self, days: int = 90) -> Dict[str, Any]:
         """清理旧数据"""
         try:
-            deleted_count = self.db_manager.cleanup_old_records(days)
-            
-            return {
-                'success': True,
-                'deleted_records': deleted_count,
-                'cleanup_days': days,
-                'timestamp': time.time()
-            }
+            if self.db_manager:
+                deleted_count = self.db_manager.cleanup_old_records(days)
+                
+                return {
+                    'success': True,
+                    'deleted_records': deleted_count,
+                    'cleanup_days': days,
+                    'timestamp': time.time()
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': 'Database manager not available',
+                    'cleanup_days': days,
+                    'timestamp': time.time()
+                }
             
         except Exception as e:
             return {
                 'success': False,
                 'error': str(e),
+                'cleanup_days': days,
                 'timestamp': time.time()
             }
 
@@ -588,14 +586,14 @@ class TEEProcessor:
         """
         # 检查是否为新的混合加密格式
         if 'encrypted_session_key' in encrypted_message:
-            self.logger.info("🔄 Detected hybrid encryption format, using improved processor")
+            self.logger.info("Detected hybrid encryption format, using improved processor")
             return self.process_hybrid_encrypted_message(encrypted_message)
         
         # 使用传统处理方式（向后兼容）
         start_time = datetime.now(timezone.utc)
         request_id = encrypted_message.get('request_id', f"legacy_req_{int(start_time.timestamp())}")
         
-        self.logger.info(f"🔒 Processing legacy encrypted message: {request_id}")
+        self.logger.info(f"Processing legacy encrypted message: {request_id}")
         self.stats['total_requests'] += 1
         
         try:
@@ -645,16 +643,16 @@ class TEEProcessor:
             self._secure_cleanup(decrypted_features, validated_features)
             
             self.stats['successful_requests'] += 1
-            self.logger.info(f"✅ Successfully processed legacy encrypted message: {request_id}")
+            self.logger.info(f"Successfully processed legacy encrypted message: {request_id}")
             return processing_result
             
         except SMCryptoError as e:
-            self.logger.error(f"❌ Legacy cryptographic error: {e}")
+            self.logger.error(f"Legacy cryptographic error: {e}")
             self.stats['failed_requests'] += 1
             return self._generate_error_response(request_id, f"Legacy cryptographic error: {e}", start_time)
         
         except Exception as e:
-            self.logger.error(f"❌ Legacy processing error: {e}")
+            self.logger.error(f"Legacy processing error: {e}")
             self.stats['failed_requests'] += 1
             return self._generate_error_response(request_id, f"Legacy processing error: {e}", start_time)
     
@@ -672,7 +670,7 @@ class TEEProcessor:
         start_time = datetime.now(timezone.utc)
         request_id = f"plaintext_req_{int(start_time.timestamp())}"
         
-        self.logger.info(f"🔓 Processing plaintext features: {request_id}")
+        self.logger.info(f"Processing plaintext features: {request_id}")
         self.stats['total_requests'] += 1
         
         try:
@@ -720,11 +718,11 @@ class TEEProcessor:
                 processing_result['signature_algorithm'] = 'SM2'
             
             self.stats['successful_requests'] += 1
-            self.logger.info(f"✅ Successfully processed plaintext features: {request_id}")
+            self.logger.info(f"Successfully processed plaintext features: {request_id}")
             return processing_result
             
         except Exception as e:
-            self.logger.error(f"❌ Plaintext processing error: {e}")
+            self.logger.error(f"Plaintext processing error: {e}")
             self.stats['failed_requests'] += 1
             return self._generate_error_response(request_id, f"Plaintext processing error: {e}", start_time)
 
