@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TEE软件监控Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- 顶部导航栏 -->
+        <header class="top-nav">
+            <div class="nav-brand">
+                <i class="fas fa-shield-alt"></i>
+                <h1>TEE软件监控Dashboard</h1>
+            </div>
+            <div class="nav-status">
+                <div class="status-indicator" id="connectionStatus">
+                    <i class="fas fa-circle"></i>
+                    <span>连接中...</span>
+                </div>
+                <div class="timestamp" id="currentTime"></div>
+            </div>
+        </header>
+
+        <!-- 主要内容区域 -->
+        <main class="main-content">
+            <!-- 系统概览卡片 -->
+            <section class="overview-cards">
+                <div class="card system-card">
+                    <div class="card-header">
+                        <i class="fas fa-server"></i>
+                        <h3>系统状态</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="metric">
+                            <span class="metric-label">CPU使用率</span>
+                            <span class="metric-value" id="cpuUsage">--%</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">内存使用率</span>
+                            <span class="metric-value" id="memoryUsage">--%</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">磁盘使用率</span>
+                            <span class="metric-value" id="diskUsage">--%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card communication-card">
+                    <div class="card-header">
+                        <i class="fas fa-exchange-alt"></i>
+                        <h3>通讯统计</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="metric">
+                            <span class="metric-label">总请求数</span>
+                            <span class="metric-value" id="totalRequests">0</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">入站请求</span>
+                            <span class="metric-value" id="inboundRequests">0</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">出站请求</span>
+                            <span class="metric-value" id="outboundRequests">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card encryption-card">
+                    <div class="card-header">
+                        <i class="fas fa-lock"></i>
+                        <h3>加密统计</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="metric">
+                            <span class="metric-label">加密事件</span>
+                            <span class="metric-value" id="encryptionEvents">0</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">活跃会话</span>
+                            <span class="metric-value" id="activeSessions">0</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">近1小时</span>
+                            <span class="metric-value" id="recentEncryptions">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card tee-card">
+                    <div class="card-header">
+                        <i class="fas fa-microchip"></i>
+                        <h3>TEE状态</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="metric">
+                            <span class="metric-label">服务状态</span>
+                            <span class="metric-value status" id="teeStatus">检查中...</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">成功率</span>
+                            <span class="metric-value" id="successRate">--%</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 图表区域 -->
+            <section class="charts-section">
+                <div class="chart-container">
+                    <div class="chart-header">
+                        <h3>系统资源监控</h3>
+                        <div class="chart-controls">
+                            <button class="btn-small" onclick="toggleChart('cpu')">CPU</button>
+                            <button class="btn-small" onclick="toggleChart('memory')">内存</button>
+                            <button class="btn-small" onclick="toggleChart('disk')">磁盘</button>
+                        </div>
+                    </div>
+                    <canvas id="systemChart"></canvas>
+                </div>
+            </section>
+
+            <!-- 通讯和加密日志 -->
+            <section class="logs-section">
+                <div class="logs-container">
+                    <!-- 通讯日志 -->
+                    <div class="log-panel">
+                        <div class="panel-header">
+                            <h3><i class="fas fa-comments"></i> 通讯日志</h3>
+                            <div class="panel-controls">
+                                <button class="btn-small" onclick="clearCommunicationLogs()">清空</button>
+                                <button class="btn-small" onclick="testCommunication()">测试通讯</button>
+                            </div>
+                        </div>
+                        <div class="log-content" id="communicationLogs">
+                            <div class="log-entry">
+                                <span class="timestamp">等待数据...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 加密事件日志 -->
+                    <div class="log-panel">
+                        <div class="panel-header">
+                            <h3><i class="fas fa-key"></i> 加密事件</h3>
+                            <div class="panel-controls">
+                                <button class="btn-small" onclick="clearEncryptionLogs()">清空</button>
+                                <button class="btn-small" onclick="testEncryption()">测试加密</button>
+                            </div>
+                        </div>
+                        <div class="log-content" id="encryptionLogs">
+                            <div class="log-entry">
+                                <span class="timestamp">等待数据...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 加密过程可视化 -->
+            <section class="encryption-visualization">
+                <div class="visualization-container">
+                    <div class="panel-header">
+                        <h3><i class="fas fa-eye"></i> 加密过程可视化</h3>
+                        <div class="panel-controls">
+                            <button class="btn-primary" onclick="showEncryptionDemo()">演示加密过程</button>
+                        </div>
+                    </div>
+                    
+                    <div class="encryption-flow" id="encryptionFlow">
+                        <div class="flow-step" id="step1">
+                            <div class="step-icon"><i class="fas fa-file-alt"></i></div>
+                            <div class="step-content">
+                                <h4>明文数据</h4>
+                                <div class="data-display" id="plaintextData">
+                                    等待演示...
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flow-arrow">
+                            <i class="fas fa-arrow-right"></i>
+                            <span>会话密钥加密</span>
+                        </div>
+
+                        <div class="flow-step" id="step2">
+                            <div class="step-icon"><i class="fas fa-lock"></i></div>
+                            <div class="step-content">
+                                <h4>密文数据</h4>
+                                <div class="data-display" id="ciphertextData">
+                                    等待演示...
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flow-arrow">
+                            <i class="fas fa-arrow-right"></i>
+                            <span>TEE公钥保护</span>
+                        </div>
+
+                        <div class="flow-step" id="step3">
+                            <div class="step-icon"><i class="fas fa-shield-alt"></i></div>
+                            <div class="step-content">
+                                <h4>受保护密钥</h4>
+                                <div class="data-display" id="protectedKey">
+                                    等待演示...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 测试控制面板 -->
+            <section class="test-panel">
+                <div class="panel-header">
+                    <h3><i class="fas fa-flask"></i> 测试控制面板</h3>
+                </div>
+                <div class="test-controls">
+                    <div class="control-group">
+                        <label>用户ID:</label>
+                        <input type="text" id="testUserId" value="test_user_dashboard" placeholder="输入用户ID">
+                    </div>
+                    <div class="control-group">
+                        <label>测试特征:</label>
+                        <textarea id="testFeatures" placeholder="输入JSON格式的特征数据">
+{
+    "ip": "192.168.1.100",
+    "user_agent": "Dashboard Test Client",
+    "rtt": 42.5,
+    "geo_location": "40.7128,-74.0060"
+}</textarea>
+                    </div>
+                    <div class="control-buttons">
+                        <button class="btn-primary" onclick="sendTestRequest()">发送测试请求</button>
+                        <button class="btn-secondary" onclick="clearTestResults()">清空结果</button>
+                    </div>
+                </div>
+                <div class="test-results" id="testResults">
+                    <!-- 测试结果将显示在这里 -->
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- WebSocket连接和JavaScript -->
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html> 

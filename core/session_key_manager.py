@@ -113,12 +113,8 @@ class SessionKeyManager:
         # PKCS7填充
         padded_data = self._pkcs7_pad(plaintext, self.block_size)
         
-        # 分块加密
-        ciphertext = b''
-        for i in range(0, len(padded_data), self.block_size):
-            block = padded_data[i:i+self.block_size]
-            encrypted_block = crypt_sm4.crypt_ecb(block)
-            ciphertext += encrypted_block
+        # 使用ECB模式加密整个数据
+        ciphertext = crypt_sm4.crypt_ecb(padded_data)
         
         return {
             'ciphertext': ciphertext.hex(),
@@ -132,23 +128,25 @@ class SessionKeyManager:
         ciphertext = bytes.fromhex(encrypted_data['ciphertext'])
         data_length = encrypted_data.get('data_length', 0)
         
+        self.logger.debug(f"SM4 decrypt: ciphertext length = {len(ciphertext)}, data_length = {data_length}")
+        
         # 创建SM4解密器
         crypt_sm4 = sm4.CryptSM4()
         crypt_sm4.set_key(session_key, sm4.SM4_DECRYPT)
         
-        # 分块解密
-        plaintext_padded = b''
-        for i in range(0, len(ciphertext), self.block_size):
-            block = ciphertext[i:i+self.block_size]
-            decrypted_block = crypt_sm4.crypt_ecb(block)
-            plaintext_padded += decrypted_block
+        # 使用ECB模式解密整个数据
+        plaintext_padded = crypt_sm4.crypt_ecb(ciphertext)
+        
+        self.logger.debug(f"SM4 decrypt: total plaintext_padded length = {len(plaintext_padded)}")
         
         # 去除填充
         plaintext = self._pkcs7_unpad(plaintext_padded)
+        self.logger.debug(f"SM4 decrypt: after unpadding length = {len(plaintext)}")
         
         # 截断到原始长度
         if data_length > 0 and len(plaintext) != data_length:
             plaintext = plaintext[:data_length]
+            self.logger.debug(f"SM4 decrypt: after truncation length = {len(plaintext)}")
         
         return plaintext
     
