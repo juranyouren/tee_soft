@@ -247,13 +247,22 @@ class TEEKeyAgreementDemo:
         """派生会话密钥集合"""
         start_time = time.time()
         
+        print(f"\n{Colors.BOLD}🔐 会话密钥派生详细过程:{Colors.ENDC}")
+        
         # 构造密钥派生上下文
         context = b"TEE_KEY_AGREEMENT_V1.0"
         nonces = client_nonce + server_nonce
         info = context + nonces
         
+        print(f"  共享秘密: {shared_secret.hex()}")
+        print(f"  派生上下文: {context.decode()}")
+        print(f"  随机数组合: {nonces.hex()}")
+        print(f"  KDF输入总长度: {len(shared_secret + info)} 字节")
+        
         # 派生足够长的密钥材料 (128字节)
         key_material = self.kdf_sm3(shared_secret, info, 128)
+        
+        print(f"  KDF输出密钥材料: {key_material.hex()}")
         
         # 分割为不同用途的密钥
         session_keys = {
@@ -267,8 +276,22 @@ class TEEKeyAgreementDemo:
         self.timing_stats["session_key_derivation"] = elapsed
         
         print_info(f"会话密钥派生完成: {elapsed:.2f}ms")
+        print(f"\n{Colors.BOLD}派生的各类密钥详情:{Colors.ENDC}")
+        
+        key_descriptions = {
+            'encryption': 'SM4对称加密密钥 - 保护数据机密性',
+            'mac': 'HMAC-SM3认证密钥 - 保护数据完整性',
+            'kdf_seed': '密钥派生种子 - 用于进一步派生其他密钥',
+            'reserve': '保留密钥材料 - 备用或扩展用途'
+        }
+        
         for key_type, key_data in session_keys.items():
-            print(f"  {key_type}密钥: {key_data[:4].hex()}...{key_data[-4:].hex()} ({len(key_data)}字节)")
+            description = key_descriptions.get(key_type, '未知用途')
+            print(f"  {key_type}密钥:")
+            print(f"    完整密钥: {key_data.hex()}")
+            print(f"    长度: {len(key_data)} 字节 ({len(key_data)*8} 位)")
+            print(f"    用途: {description}")
+            print()
         
         return session_keys
     
@@ -282,9 +305,14 @@ class TEEKeyAgreementDemo:
             # 使用标准HMAC-SHA256
             return hmac.new(key, message, hashlib.sha256).digest()
     
-    def sm4_encrypt(self, key: bytes, plaintext: bytes) -> bytes:
+    def sm4_encrypt(self, key: bytes, plaintext: bytes, show_key_info: bool = True) -> bytes:
         """SM4加密"""
         start_time = time.time()
+        
+        if show_key_info:
+            print(f"    🔒 SM4加密操作:")
+            print(f"      加密密钥: {key.hex()}")
+            print(f"      明文长度: {len(plaintext)} 字节")
         
         if HAS_GMSSL and len(key) == 16:
             try:
@@ -302,7 +330,8 @@ class TEEKeyAgreementDemo:
                     encrypted_block = sm4_crypt.crypt_ecb(block)
                     ciphertext += encrypted_block
             except Exception as e:
-                print_warning(f"SM4加密回退到AES模拟: {str(e)}")
+                if show_key_info:
+                    print_warning(f"      SM4加密回退到AES模拟: {str(e)}")
                 # 备用方案：AES模拟
                 try:
                     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -321,15 +350,20 @@ class TEEKeyAgreementDemo:
         elapsed = (time.time() - start_time) * 1000
         self.timing_stats["sm4_encrypt"] = elapsed
         
-        print_info(f"SM4加密完成: {elapsed:.2f}ms")
-        print(f"  明文长度: {len(plaintext)} 字节")
-        print(f"  密文长度: {len(ciphertext)} 字节")
+        if show_key_info:
+            print(f"      密文长度: {len(ciphertext)} 字节")
+            print(f"      加密耗时: {elapsed:.2f}ms")
         
         return ciphertext
     
-    def sm4_decrypt(self, key: bytes, ciphertext: bytes) -> bytes:
+    def sm4_decrypt(self, key: bytes, ciphertext: bytes, show_key_info: bool = True) -> bytes:
         """SM4解密"""
         start_time = time.time()
+        
+        if show_key_info:
+            print(f"    🔓 SM4解密操作:")
+            print(f"      解密密钥: {key.hex()}")
+            print(f"      密文长度: {len(ciphertext)} 字节")
         
         if HAS_GMSSL and len(key) == 16:
             try:
@@ -347,7 +381,8 @@ class TEEKeyAgreementDemo:
                 # 去填充
                 plaintext = self.pkcs7_unpad(plaintext)
             except Exception as e:
-                print_warning(f"SM4解密回退到AES模拟: {str(e)}")
+                if show_key_info:
+                    print_warning(f"      SM4解密回退到AES模拟: {str(e)}")
                 # 备用方案：AES模拟
                 try:
                     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -367,9 +402,9 @@ class TEEKeyAgreementDemo:
         elapsed = (time.time() - start_time) * 1000
         self.timing_stats["sm4_decrypt"] = elapsed
         
-        print_info(f"SM4解密完成: {elapsed:.2f}ms")
-        print(f"  密文长度: {len(ciphertext)} 字节")
-        print(f"  明文长度: {len(plaintext)} 字节")
+        if show_key_info:
+            print(f"      明文长度: {len(plaintext)} 字节")
+            print(f"      解密耗时: {elapsed:.2f}ms")
         
         return plaintext
     
@@ -544,6 +579,11 @@ class TEEKeyAgreementDemo:
             print_error("会话上下文未建立")
             return
         
+        # 显示当前可用的会话密钥
+        print(f"\n{Colors.BOLD}🔑 当前会话密钥详情:{Colors.ENDC}")
+        for key_type, key_data in self.session_context.session_keys.items():
+            print(f"  {key_type}密钥: {key_data.hex()[:16]}...{key_data.hex()[-8:]} ({len(key_data)}字节)")
+        
         # 模拟用户数据
         user_data = "这是需要安全传输的敏感用户数据：用户ID=12345，余额=10000元，操作=转账".encode('utf-8')
         
@@ -551,12 +591,26 @@ class TEEKeyAgreementDemo:
         print_info(f"数据长度: {len(user_data)} 字节")
         
         # 客户端加密数据
-        print("\n🔒 客户端加密过程:")
-        encrypted_data = self.sm4_encrypt(self.session_context.session_keys['encryption'], user_data)
+        print(f"\n🔒 客户端加密过程:")
+        encryption_key = self.session_context.session_keys['encryption']
+        print(f"{Colors.BOLD}使用加密密钥:{Colors.ENDC}")
+        print(f"  密钥类型: SM4对称加密密钥")
+        print(f"  密钥长度: {len(encryption_key)} 字节")
+        print(f"  密钥值: {encryption_key.hex()}")
+        print(f"  密钥来源: 从ECDH共享秘密派生的encryption字段")
+        
+        encrypted_data = self.sm4_encrypt(encryption_key, user_data)
         
         # 生成消息认证码
-        message_mac = self.generate_hmac_sm3(self.session_context.session_keys['mac'], encrypted_data)
-        print_info(f"消息MAC: {message_mac[:8].hex()}...{message_mac[-4:].hex()}")
+        mac_key = self.session_context.session_keys['mac']
+        print(f"\n{Colors.BOLD}使用MAC密钥生成消息认证码:{Colors.ENDC}")
+        print(f"  密钥类型: HMAC-SM3认证密钥")
+        print(f"  密钥长度: {len(mac_key)} 字节")
+        print(f"  密钥值: {mac_key.hex()}")
+        print(f"  密钥来源: 从ECDH共享秘密派生的mac字段")
+        
+        message_mac = self.generate_hmac_sm3(mac_key, encrypted_data)
+        print_info(f"消息MAC: {message_mac.hex()}")
         
         # 构造安全消息
         secure_message = {
@@ -573,10 +627,15 @@ class TEEKeyAgreementDemo:
         time.sleep(0.1)  # 模拟网络延迟
         
         # 服务器接收和解密
-        print("\n🔓 服务器解密过程:")
+        print(f"\n🔓 服务器解密过程:")
         
         # 验证MAC
-        verify_mac = self.generate_hmac_sm3(self.session_context.session_keys['mac'], secure_message['encrypted_data'])
+        print(f"{Colors.BOLD}使用MAC密钥验证消息完整性:{Colors.ENDC}")
+        print(f"  验证密钥: {mac_key.hex()}")
+        verify_mac = self.generate_hmac_sm3(mac_key, secure_message['encrypted_data'])
+        print(f"  计算MAC: {verify_mac.hex()}")
+        print(f"  接收MAC: {secure_message['mac'].hex()}")
+        
         if secure_message['mac'] == verify_mac:
             print_success("消息完整性验证通过")
         else:
@@ -584,7 +643,11 @@ class TEEKeyAgreementDemo:
             return
         
         # 解密数据
-        decrypted_data = self.sm4_decrypt(self.session_context.session_keys['encryption'], secure_message['encrypted_data'])
+        print(f"\n{Colors.BOLD}使用加密密钥解密数据:{Colors.ENDC}")
+        print(f"  解密密钥: {encryption_key.hex()}")
+        print(f"  密文长度: {len(secure_message['encrypted_data'])} 字节")
+        
+        decrypted_data = self.sm4_decrypt(encryption_key, secure_message['encrypted_data'])
         
         try:
             decoded_message = decrypted_data.decode('utf-8')
@@ -603,19 +666,30 @@ class TEEKeyAgreementDemo:
             print_info("在真实环境中，会使用标准的SM4算法确保数据完整性")
         
         # 演示双向通信
-        print("\n🔄 演示双向安全通信:")
+        print(f"\n🔄 演示双向安全通信:")
         
         # 服务器响应
         response_data = "转账成功！交易ID: TXN_20240601_001234，新余额: 9000元".encode('utf-8')
-        encrypted_response = self.sm4_encrypt(self.session_context.session_keys['encryption'], response_data)
-        response_mac = self.generate_hmac_sm3(self.session_context.session_keys['mac'], encrypted_response)
         
-        print_info(f"服务器响应: {response_data.decode('utf-8')}")
+        print(f"{Colors.BOLD}服务器使用相同的会话密钥加密响应:{Colors.ENDC}")
+        print(f"  响应内容: {response_data.decode('utf-8')}")
+        print(f"  使用加密密钥: {encryption_key.hex()}")
+        
+        encrypted_response = self.sm4_encrypt(encryption_key, response_data)
+        
+        print(f"  使用MAC密钥: {mac_key.hex()}")
+        response_mac = self.generate_hmac_sm3(mac_key, encrypted_response)
+        print(f"  响应MAC: {response_mac.hex()}")
         
         # 客户端接收响应
-        verify_response_mac = self.generate_hmac_sm3(self.session_context.session_keys['mac'], encrypted_response)
+        print(f"\n{Colors.BOLD}客户端使用相同密钥验证和解密响应:{Colors.ENDC}")
+        verify_response_mac = self.generate_hmac_sm3(mac_key, encrypted_response)
+        print(f"  验证MAC: {verify_response_mac.hex()}")
+        
         if response_mac == verify_response_mac:
-            decrypted_response = self.sm4_decrypt(self.session_context.session_keys['encryption'], encrypted_response)
+            print_success("响应消息完整性验证通过")
+            print(f"  使用解密密钥: {encryption_key.hex()}")
+            decrypted_response = self.sm4_decrypt(encryption_key, encrypted_response)
             try:
                 decoded_response = decrypted_response.decode('utf-8')
                 print_success(f"客户端收到: {decoded_response}")
@@ -624,6 +698,13 @@ class TEEKeyAgreementDemo:
                 print_info("在真实环境中，会确保数据编码的一致性")
         else:
             print_error("响应消息完整性验证失败")
+        
+        # 密钥使用总结
+        print(f"\n{Colors.BOLD}🔑 密钥使用总结:{Colors.ENDC}")
+        print("  1. 加密密钥用于: SM4对称加密保护数据机密性")
+        print("  2. MAC密钥用于: HMAC-SM3保护数据完整性")
+        print("  3. 双方使用相同的会话密钥确保安全通信")
+        print("  4. 所有密钥均从ECDH共享秘密安全派生")
     
     def show_performance_statistics(self):
         """显示性能统计"""
