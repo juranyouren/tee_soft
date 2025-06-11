@@ -726,6 +726,89 @@ class TEEProcessor:
             self.stats['failed_requests'] += 1
             return self._generate_error_response(request_id, f"Plaintext processing error: {e}", start_time)
 
+    def process_request(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        通用请求处理方法 - 自动检测请求类型并调用相应的处理器
+        
+        Args:
+            request_data: 请求数据
+            
+        Returns:
+            处理结果
+        """
+        if not self._initialized:
+            raise TEEProcessorError("TEE processor not initialized")
+        
+        start_time = datetime.now(timezone.utc)
+        request_id = request_data.get('request_id', f"auto_req_{int(start_time.timestamp())}")
+        
+        self.logger.info(f"Processing request: {request_id}")
+        
+        try:
+            # 检测请求类型
+            if 'encrypted_session_key' in request_data:
+                # 新的混合加密格式
+                self.logger.info("Detected hybrid encrypted request")
+                return self.process_hybrid_encrypted_message(request_data)
+            
+            elif 'encrypted_features' in request_data:
+                # 传统加密格式
+                self.logger.info("Detected legacy encrypted request")
+                return self.process_encrypted_message(request_data)
+            
+            elif 'features' in request_data:
+                # 明文特征数据
+                self.logger.info("Detected plaintext request")
+                features = request_data['features']
+                context = {
+                    'user_id': request_data.get('user_id'),
+                    'source_ip': request_data.get('source_ip'),
+                    'user_agent': request_data.get('user_agent'),
+                    'request_id': request_id,
+                    'timestamp': start_time.isoformat()
+                }
+                return self.process_plaintext_features(features, context)
+            
+            else:
+                # 尝试直接作为特征数据处理
+                self.logger.info("Treating request as direct feature data")
+                # 从请求中提取特征相关的字段
+                features = {}
+                context = {}
+                
+                # 常见的特征字段
+                feature_fields = ['ip', 'user_agent', 'rtt', 'geo_location', 'device_type', 
+                                'browser_version', 'screen_resolution', 'timezone']
+                
+                for field in feature_fields:
+                    if field in request_data:
+                        features[field] = request_data[field]
+                
+                # 上下文字段
+                if 'user_id' in request_data:
+                    context['user_id'] = request_data['user_id']
+                if 'source_ip' in request_data:
+                    context['source_ip'] = request_data['source_ip']
+                
+                context.update({
+                    'request_id': request_id,
+                    'timestamp': start_time.isoformat()
+                })
+                
+                if not features:
+                    # 如果没有找到明确的特征字段，使用整个请求作为特征
+                    features = {k: v for k, v in request_data.items() 
+                               if k not in ['request_id', 'timestamp']}
+                
+                if not features:
+                    raise TEEProcessorError("No valid features found in request")
+                
+                return self.process_plaintext_features(features, context)
+                
+        except Exception as e:
+            self.logger.error(f"Request processing failed: {e}")
+            return self._generate_error_response(request_id, str(e), start_time)
+
 
 # 全局TEE处理器实例
 _tee_processor: Optional[TEEProcessor] = None
