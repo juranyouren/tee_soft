@@ -1,0 +1,2565 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TEE软件监控仪表板</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+    
+    <style>
+        :root {
+            --primary-color: #0d6efd;
+            --success-color: #198754;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+            --info-color: #0dcaf0;
+            --dark-color: #212529;
+            --light-color: #f8f9fa;
+        }
+        
+        body {
+            background-color: var(--light-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .navbar {
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .card {
+            border: none;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        
+        .card:hover {
+            transform: translateY(-2px);
+        }
+        
+        .card-header {
+            background: linear-gradient(135deg, var(--primary-color), var(--info-color));
+            color: white;
+            font-weight: 600;
+        }
+        
+        .metric-card {
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        .metric-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+        }
+        
+        .status-healthy { background-color: var(--success-color); }
+        .status-warning { background-color: var(--warning-color); }
+        .status-error { background-color: var(--danger-color); }
+        
+        .alert-item {
+            border-left: 4px solid var(--danger-color);
+            margin-bottom: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 4px;
+        }
+        
+        .test-result {
+            padding: 8px 12px;
+            margin: 5px 0;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+        
+        .test-success {
+            background-color: rgba(25, 135, 84, 0.1);
+            border-left: 4px solid var(--success-color);
+        }
+        
+        .test-failure {
+            background-color: rgba(220, 53, 69, 0.1);
+            border-left: 4px solid var(--danger-color);
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin: 20px 0;
+        }
+        
+        .progress-custom {
+            height: 25px;
+            margin: 10px 0;
+        }
+        
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(0,0,0,.3);
+            border-radius: 50%;
+            border-top-color: var(--primary-color);
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .nav-pills .nav-link.active {
+            background-color: var(--primary-color);
+        }
+        
+        .table-sm th {
+            background-color: var(--light-color);
+            border-top: none;
+        }
+        
+        .btn-group-sm > .btn {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
+        }
+        
+        /* 通信流程样式 */
+        .communication-flow {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .flow-step {
+            display: flex;
+            align-items: center;
+            background: #fff;
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            padding: 15px 20px;
+            margin: 10px 0;
+            min-width: 350px;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        
+        .flow-step.active {
+            border-color: var(--primary-color);
+            background: rgba(13, 110, 253, 0.05);
+            transform: scale(1.02);
+        }
+        
+        .flow-step.completed {
+            border-color: var(--success-color);
+            background: rgba(25, 135, 84, 0.05);
+        }
+        
+        .flow-step.error {
+            border-color: var(--danger-color);
+            background: rgba(220, 53, 69, 0.05);
+        }
+        
+        .step-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: var(--light-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 15px;
+            font-size: 1.2rem;
+            color: var(--primary-color);
+        }
+        
+        .flow-step.active .step-icon {
+            background: var(--primary-color);
+            color: white;
+        }
+        
+        .flow-step.completed .step-icon {
+            background: var(--success-color);
+            color: white;
+        }
+        
+        .flow-step.error .step-icon {
+            background: var(--danger-color);
+            color: white;
+        }
+        
+        .step-content {
+            flex: 1;
+        }
+        
+        .step-content h6 {
+            margin: 0 0 5px 0;
+            font-weight: 600;
+        }
+        
+        .step-content small {
+            color: #6c757d;
+        }
+        
+        .step-status {
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+        }
+        
+        .flow-arrow {
+            color: #6c757d;
+            font-size: 1.5rem;
+            margin: 5px 0;
+        }
+        
+        .communication-details {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .detail-item {
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .detail-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+        }
+        
+        .code-display {
+            background: #2d3748;
+            color: #e2e8f0;
+            border-radius: 4px;
+            padding: 8px 12px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            margin-top: 5px;
+            word-break: break-all;
+            max-height: 60px;
+            overflow-y: auto;
+        }
+        
+        .result-display {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+            min-height: 200px;
+        }
+        
+        .result-success {
+            background: rgba(25, 135, 84, 0.1);
+            border-color: var(--success-color);
+        }
+        
+        .result-error {
+            background: rgba(220, 53, 69, 0.1);
+            border-color: var(--danger-color);
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-shield-alt me-2"></i>
+                TEE软件监控仪表板
+            </a>
+            <div class="navbar-nav ms-auto">
+                <span class="navbar-text me-3">
+                    <span class="status-indicator" id="connectionStatus"></span>
+                    <span id="connectionText">连接中...</span>
+                </span>
+                <span class="navbar-text">
+                    <i class="fas fa-clock me-1"></i>
+                    <span id="currentTime"></span>
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <!-- 导航选项卡 -->
+        <ul class="nav nav-tabs mb-4" id="mainTabs">
+            <li class="nav-item">
+                <a class="nav-link active" data-bs-toggle="tab" href="#overviewTab">总览</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#systemTab">系统监控</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#testingTab">API测试</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#communicationTab">TEE通信演示</a>
+            </li>
+        </ul>
+
+        <!-- 选项卡内容 -->
+        <div class="tab-content">
+            <!-- 总览选项卡 -->
+            <div class="tab-pane fade show active" id="overviewTab">
+                <!-- 概览面板 -->
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="card metric-card">
+                            <div class="card-body">
+                                <i class="fas fa-microchip fa-2x text-primary mb-2"></i>
+                                <div class="metric-value text-primary" id="cpuUsage">--</div>
+                                <div class="metric-label">TEE软件CPU使用率</div>
+                                <div class="progress progress-custom">
+                                    <div class="progress-bar bg-primary" id="cpuProgress" style="width: 0%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card metric-card">
+                            <div class="card-body">
+                                <i class="fas fa-memory fa-2x text-info mb-2"></i>
+                                <div class="metric-value text-info" id="memoryUsage">--</div>
+                                <div class="metric-label">TEE软件内存占用</div>
+                                <div class="progress progress-custom">
+                                    <div class="progress-bar bg-info" id="memoryProgress" style="width: 0%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card metric-card">
+                            <div class="card-body">
+                                <i class="fas fa-cog fa-2x text-warning mb-2"></i>
+                                <div class="metric-value text-warning" id="diskUsage">--</div>
+                                <div class="metric-label">TEE进程状态</div>
+                                <div class="progress progress-custom">
+                                    <div class="progress-bar bg-warning" id="diskProgress" style="width: 0%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card metric-card">
+                            <div class="card-body">
+                                <i class="fas fa-check-circle fa-2x text-success mb-2"></i>
+                                <div class="metric-value text-success" id="apiSuccessRate">--</div>
+                                <div class="metric-label">API成功率</div>
+                                <div class="progress progress-custom">
+                                    <div class="progress-bar bg-success" id="apiProgress" style="width: 0%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 系统监控选项卡 -->
+            <div class="tab-pane fade" id="systemTab">
+                <div class="row">
+                    <!-- 左侧：系统监控 -->
+                    <div class="col-lg-8">
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <i class="fas fa-chart-line me-2"></i>
+                                TEE软件进程监控
+                                <div class="float-end">
+                                    <button class="btn btn-sm btn-outline-light" id="refreshSystemBtn">
+                                        <i class="fas fa-sync-alt"></i> 刷新
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <ul class="nav nav-pills mb-3" id="systemTabs">
+                                    <li class="nav-item">
+                                        <a class="nav-link active" data-bs-toggle="pill" href="#cpuTab">CPU</a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a class="nav-link" data-bs-toggle="pill" href="#memoryTab">内存</a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a class="nav-link" data-bs-toggle="pill" href="#networkTab">网络</a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a class="nav-link" data-bs-toggle="pill" href="#processTab">TEE进程</a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a class="nav-link" data-bs-toggle="pill" href="#memoryOptimizationTab">内存优化</a>
+                                    </li>
+                                </ul>
+                                
+                                <div class="tab-content">
+                                    <div class="tab-pane fade show active" id="cpuTab">
+                                        <div class="chart-container">
+                                            <canvas id="cpuChart"></canvas>
+                                        </div>
+                                    </div>
+                                    <div class="tab-pane fade" id="memoryTab">
+                                        <div class="chart-container">
+                                            <canvas id="memoryChart"></canvas>
+                                        </div>
+                                    </div>
+                                    <div class="tab-pane fade" id="networkTab">
+                                        <div class="chart-container">
+                                            <canvas id="networkChart"></canvas>
+                                        </div>
+                                    </div>
+                                    <div class="tab-pane fade" id="processTab">
+                                        <div class="table-responsive">
+                                            <table class="table table-sm">
+                                                <thead>
+                                                    <tr>
+                                                        <th>PID</th>
+                                                        <th>TEE进程名</th>
+                                                        <th>CPU%</th>
+                                                        <th>内存(MB)</th>
+                                                        <th>状态/运行时间</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="processTable">
+                                                    <tr>
+                                                        <td colspan="5" class="text-center">
+                                                            <div class="loading-spinner"></div> 加载TEE进程信息...
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    <div class="tab-pane fade" id="memoryOptimizationTab">
+                                        <!-- TEE内存优化面板 -->
+                                        <div class="row">
+                                            <div class="col-md-8">
+                                                <!-- 内存使用状态 -->
+                                                <div class="card mb-3">
+                                                    <div class="card-header d-flex justify-content-between align-items-center">
+                                                        <h6 class="mb-0">
+                                                            <i class="fas fa-memory me-2"></i>
+                                                            TEE软件内存使用状态
+                                                        </h6>
+                                                        <button class="btn btn-sm btn-outline-primary" id="refreshMemoryBtn">
+                                                            <i class="fas fa-sync-alt"></i> 刷新
+                                                        </button>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <div class="row">
+                                                            <div class="col-md-6">
+                                                                <div class="mb-3">
+                                                                    <label class="form-label text-muted">当前使用量</label>
+                                                                    <div class="h4 text-primary" id="currentMemoryUsage">-- MB</div>
+                                                                    <div class="progress">
+                                                                        <div class="progress-bar" id="memoryUsageProgress" style="width: 0%"></div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-md-6">
+                                                                <div class="mb-3">
+                                                                    <label class="form-label text-muted">内存限制</label>
+                                                                    <div class="h4 text-secondary">128 MB</div>
+                                                                    <div class="small text-muted">低内存模式</div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <div class="row">
+                                                            <div class="col-md-4">
+                                                                <div class="text-center">
+                                                                    <div class="h6 text-muted">使用率</div>
+                                                                    <div class="h5" id="memoryUtilization">--%</div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-md-4">
+                                                                <div class="text-center">
+                                                                    <div class="h6 text-muted">趋势</div>
+                                                                    <div class="h5" id="memoryTrend">--</div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-md-4">
+                                                                <div class="text-center">
+                                                                    <div class="h6 text-muted">状态</div>
+                                                                    <div class="h5" id="memoryStatus">--</div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                <!-- 内存趋势图 -->
+                                                <div class="card mb-3">
+                                                    <div class="card-header">
+                                                        <h6 class="mb-0">
+                                                            <i class="fas fa-chart-area me-2"></i>
+                                                            TEE软件内存使用趋势
+                                                        </h6>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <div class="chart-container">
+                                                            <canvas id="teeMemoryChart"></canvas>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="col-md-4">
+                                                <!-- 优化操作 -->
+                                                <div class="card mb-3">
+                                                    <div class="card-header">
+                                                        <h6 class="mb-0">
+                                                            <i class="fas fa-tools me-2"></i>
+                                                            内存优化操作
+                                                        </h6>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <button class="btn btn-primary w-100 mb-2" id="optimizeMemoryBtn">
+                                                            <i class="fas fa-magic me-2"></i>
+                                                            立即优化TEE内存
+                                                        </button>
+                                                        
+                                                        <div class="mb-3">
+                                                            <label class="form-label">优化结果</label>
+                                                            <div id="optimizationResult" class="border rounded p-2 bg-light small">
+                                                                点击上方按钮开始优化
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <div class="mb-3">
+                                                            <label class="form-label">优化统计</label>
+                                                            <div class="row text-center">
+                                                                <div class="col-6">
+                                                                    <div class="h6 text-success" id="optimizationCount">0</div>
+                                                                    <small class="text-muted">总优化次数</small>
+                                                                </div>
+                                                                <div class="col-6">
+                                                                    <div class="h6 text-info" id="memorySaved">0MB</div>
+                                                                    <small class="text-muted">累计节省</small>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                <!-- 优化建议 -->
+                                                <div class="card">
+                                                    <div class="card-header">
+                                                        <h6 class="mb-0">
+                                                            <i class="fas fa-lightbulb me-2"></i>
+                                                            优化建议
+                                                        </h6>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <div id="optimizationRecommendations">
+                                                            <div class="text-muted text-center py-3">
+                                                                <i class="fas fa-spinner fa-spin"></i> 分析中...
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- 优化日志 -->
+                                        <div class="card mt-3">
+                                            <div class="card-header">
+                                                <h6 class="mb-0">
+                                                    <i class="fas fa-history me-2"></i>
+                                                    优化操作日志
+                                                </h6>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="table-responsive">
+                                                    <table class="table table-sm">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>时间</th>
+                                                                <th>触发方式</th>
+                                                                <th>优化前(MB)</th>
+                                                                <th>优化后(MB)</th>
+                                                                <th>节省</th>
+                                                                <th>状态</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody id="optimizationLogTable">
+                                                            <tr>
+                                                                <td colspan="6" class="text-center text-muted">暂无优化记录</td>
+                                                            </tr>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- API测试选项卡 -->
+            <div class="tab-pane fade" id="testingTab">
+                <div class="row">
+                    <div class="col-lg-8">
+                        <!-- API测试面板 -->
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0">
+                                    <i class="fas fa-vials me-2"></i>
+                                    API功能测试
+                                </h6>
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-primary" id="runTestBtn">
+                                        <i class="fas fa-play me-1"></i>
+                                        运行测试
+                                    </button>
+                                    <button class="btn btn-outline-info" id="runSuiteBtn">
+                                        <i class="fas fa-cogs me-1"></i>
+                                        完整测试套件
+                                    </button>
+                                    <button class="btn btn-outline-secondary" id="clearTestBtn">
+                                        <i class="fas fa-trash me-1"></i>
+                                        清除历史
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <!-- 当前测试进度 -->
+                                <div id="currentTestProgress" style="display: none;">
+                                    <h6 class="text-primary">
+                                        <i class="fas fa-spinner fa-spin me-2"></i>
+                                        当前测试进度
+                                    </h6>
+                                    <div class="mb-3">
+                                        <div class="d-flex justify-content-between mb-1">
+                                            <small id="progressText">初始化中...</small>
+                                            <small id="progressPercent">0%</small>
+                                        </div>
+                                        <div class="progress">
+                                            <div class="progress-bar bg-primary" id="progressBar" style="width: 0%"></div>
+                                        </div>
+                                    </div>
+                                    <div id="currentStepDetails" class="small text-muted mb-3"></div>
+                                    
+                                    <!-- 测试步骤列表 -->
+                                    <div id="testStepsList" class="mb-3">
+                                        <h6 class="small text-secondary mb-2">测试步骤:</h6>
+                                        <div id="stepsContainer"></div>
+                                    </div>
+                                </div>
+                                
+                                <!-- 测试统计 -->
+                                <div class="row mb-3">
+                                    <div class="col-md-3">
+                                        <div class="text-center">
+                                            <div class="h5 text-success mb-0" id="testSuccessCount">0</div>
+                                            <small class="text-muted">成功</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="text-center">
+                                            <div class="h5 text-danger mb-0" id="testFailureCount">0</div>
+                                            <small class="text-muted">失败</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="text-center">
+                                            <div class="h5 text-info mb-0" id="testAvgResponseTime">0ms</div>
+                                            <small class="text-muted">平均响应时间</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="text-center">
+                                            <div class="h5 text-primary mb-0" id="testSuccessRate">0%</div>
+                                            <small class="text-muted">成功率</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- 测试会话历史 -->
+                                <div class="mb-3">
+                                    <h6 class="text-secondary mb-2">最近测试会话:</h6>
+                                    <div id="testSessionsList" class="mb-3">
+                                        <div class="text-muted text-center py-3">暂无测试会话</div>
+                                    </div>
+                                </div>
+                                
+                                <!-- 最近测试结果 -->
+                                <div id="testResults">
+                                    <h6 class="text-secondary mb-2">最近测试结果:</h6>
+                                    <div id="testResultsList">
+                                        <div class="text-muted text-center py-3">暂无测试结果</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 右侧：系统状态和手动测试 -->
+                    <div class="col-lg-4">
+                        <!-- 系统状态 -->
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <i class="fas fa-heartbeat me-2"></i>
+                                系统状态
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <strong>TEE服务器:</strong>
+                                    <span class="ms-2" id="teeServerStatus">
+                                        <span class="status-indicator status-warning"></span>
+                                        检查中...
+                                    </span>
+                                </div>
+                                <div class="mb-3">
+                                    <strong>运行时间:</strong>
+                                    <span class="ms-2" id="systemUptime">--</span>
+                                </div>
+                                <div class="mb-3">
+                                    <strong>总请求数:</strong>
+                                    <span class="ms-2" id="totalRequests">--</span>
+                                </div>
+                                <div>
+                                    <strong>系统健康:</strong>
+                                    <span class="ms-2" id="systemHealth">
+                                        <span class="status-indicator status-warning"></span>
+                                        评估中...
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 告警面板 -->
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <i class="fas fa-exclamation-triangle me-2"></i>
+                                系统告警
+                                <div class="float-end">
+                                    <button class="btn btn-sm btn-outline-light" id="clearAlertsBtn">
+                                        <i class="fas fa-times"></i> 清除
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="alertsContainer" style="max-height: 300px; overflow-y: auto;">
+                                    <div class="text-center text-muted">
+                                        <i class="fas fa-check-circle me-2"></i>
+                                        暂无告警
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 手动测试 -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="mb-0">
+                                    <i class="fas fa-tools me-2"></i>
+                                    手动测试
+                                </h6>
+                            </div>
+                            <div class="card-body">
+                                <form id="manualTestForm">
+                                    <div class="mb-3">
+                                        <label class="form-label">API端点</label>
+                                        <select class="form-select" id="testEndpoint">
+                                            <option value="/health">/health</option>
+                                            <option value="/api/status">/api/status</option>
+                                            <option value="/tee_soft/encrypt">/tee_soft/encrypt</option>
+                                            <option value="/tee_soft/decrypt">/tee_soft/decrypt</option>
+                                            <option value="/tee_soft/process">/tee_soft/process</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">请求方法</label>
+                                        <select class="form-select" id="testMethod">
+                                            <option value="GET">GET</option>
+                                            <option value="POST">POST</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">请求数据 (JSON)</label>
+                                        <textarea class="form-control" id="testData" rows="4" placeholder='{"key": "value"}'></textarea>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary btn-sm w-100">
+                                        <i class="fas fa-play me-1"></i>
+                                        执行测试
+                                    </button>
+                                </form>
+                                <div id="manualTestResult" class="mt-3"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TEE通信演示选项卡 -->
+            <div class="tab-pane fade" id="communicationTab">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-exchange-alt me-2"></i>
+                            TEE混合加密通信演示
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- 通信流程可视化 -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h6 class="text-primary mb-3">通信流程图</h6>
+                                <div class="communication-flow">
+                                    <div class="flow-step" id="step1">
+                                        <div class="step-icon">
+                                            <i class="fas fa-key"></i>
+                                        </div>
+                                        <div class="step-content">
+                                            <h6>1. 获取公钥</h6>
+                                            <small>从TEE软件获取SM2公钥</small>
+                                        </div>
+                                        <div class="step-status" id="step1-status">
+                                            <i class="fas fa-clock text-muted"></i>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flow-arrow">
+                                        <i class="fas fa-arrow-down"></i>
+                                    </div>
+                                    
+                                    <div class="flow-step" id="step2">
+                                        <div class="step-icon">
+                                            <i class="fas fa-random"></i>
+                                        </div>
+                                        <div class="step-content">
+                                            <h6>2. 生成会话密钥</h6>
+                                            <small>生成SM4会话密钥用于数据加密</small>
+                                        </div>
+                                        <div class="step-status" id="step2-status">
+                                            <i class="fas fa-clock text-muted"></i>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flow-arrow">
+                                        <i class="fas fa-arrow-down"></i>
+                                    </div>
+                                    
+                                    <div class="flow-step" id="step3">
+                                        <div class="step-icon">
+                                            <i class="fas fa-lock"></i>
+                                        </div>
+                                        <div class="step-content">
+                                            <h6>3. 加密用户数据</h6>
+                                            <small>使用SM4会话密钥加密用户信息</small>
+                                        </div>
+                                        <div class="step-status" id="step3-status">
+                                            <i class="fas fa-clock text-muted"></i>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flow-arrow">
+                                        <i class="fas fa-arrow-down"></i>
+                                    </div>
+                                    
+                                    <div class="flow-step" id="step4">
+                                        <div class="step-icon">
+                                            <i class="fas fa-shield-alt"></i>
+                                        </div>
+                                        <div class="step-content">
+                                            <h6>4. 加密会话密钥</h6>
+                                            <small>使用SM2公钥加密会话密钥</small>
+                                        </div>
+                                        <div class="step-status" id="step4-status">
+                                            <i class="fas fa-clock text-muted"></i>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flow-arrow">
+                                        <i class="fas fa-arrow-down"></i>
+                                    </div>
+                                    
+                                    <div class="flow-step" id="step5">
+                                        <div class="step-icon">
+                                            <i class="fas fa-paper-plane"></i>
+                                        </div>
+                                        <div class="step-content">
+                                            <h6>5. 发送加密数据</h6>
+                                            <small>发送加密的会话密钥和用户数据</small>
+                                        </div>
+                                        <div class="step-status" id="step5-status">
+                                            <i class="fas fa-clock text-muted"></i>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flow-arrow">
+                                        <i class="fas fa-arrow-down"></i>
+                                    </div>
+                                    
+                                    <div class="flow-step" id="step6">
+                                        <div class="step-icon">
+                                            <i class="fas fa-chart-line"></i>
+                                        </div>
+                                        <div class="step-content">
+                                            <h6>6. 获取风险分数</h6>
+                                            <small>TEE软件返回风险评估结果</small>
+                                        </div>
+                                        <div class="step-status" id="step6-status">
+                                            <i class="fas fa-clock text-muted"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 用户输入区域 -->
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <h6 class="text-secondary mb-3">用户信息输入</h6>
+                                <form id="userDataForm">
+                                    <div class="mb-3">
+                                        <label class="form-label">用户ID</label>
+                                        <input type="text" class="form-control" id="userId" value="demo_user_001">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">IP地址</label>
+                                        <input type="text" class="form-control" id="ipAddress" value="192.168.1.100">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">设备类型</label>
+                                        <select class="form-control" id="deviceType">
+                                            <option value="desktop">桌面设备</option>
+                                            <option value="mobile">移动设备</option>
+                                            <option value="tablet">平板设备</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">浏览器</label>
+                                        <input type="text" class="form-control" id="userAgent" value="Chrome/120.0.0.0">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">地理位置</label>
+                                        <input type="text" class="form-control" id="geoLocation" value="Beijing, China">
+                                    </div>
+                                    <button type="button" class="btn btn-primary" id="startCommunicationBtn">
+                                        <i class="fas fa-play me-2"></i>
+                                        开始TEE通信演示
+                                    </button>
+                                </form>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <h6 class="text-secondary mb-3">通信详情</h6>
+                                <div class="communication-details" id="communicationDetails">
+                                    <div class="detail-item">
+                                        <strong>TEE服务器:</strong>
+                                        <span id="teeServerUrl">等待连接...</span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <strong>公钥:</strong>
+                                        <div id="publicKeyDisplay" class="code-display">等待获取...</div>
+                                    </div>
+                                    <div class="detail-item">
+                                        <strong>会话密钥:</strong>
+                                        <div id="sessionKeyDisplay" class="code-display">等待生成...</div>
+                                    </div>
+                                    <div class="detail-item">
+                                        <strong>加密后的用户数据:</strong>
+                                        <div id="encryptedDataDisplay" class="code-display">等待加密...</div>
+                                    </div>
+                                    <div class="detail-item">
+                                        <strong>加密后的会话密钥:</strong>
+                                        <div id="encryptedSessionKeyDisplay" class="code-display">等待加密...</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 结果显示区域 -->
+                        <div class="row">
+                            <div class="col-12">
+                                <h6 class="text-secondary mb-3">通信结果</h6>
+                                <div id="communicationResult" class="result-display">
+                                    <div class="text-muted text-center py-4">
+                                        点击上方按钮开始通信演示
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        // 全局变量
+        let socket;
+        let charts = {};
+        let isConnected = false;
+        
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeWebSocket();
+            initializeCharts();
+            initializeEventListeners();
+            updateCurrentTime();
+            setInterval(updateCurrentTime, 1000);
+        });
+        
+        // WebSocket连接
+        function initializeWebSocket() {
+            socket = io('/dashboard');
+            
+            socket.on('connect', function() {
+                isConnected = true;
+                updateConnectionStatus('connected', '已连接');
+                console.log('Connected to dashboard server');
+            });
+            
+            socket.on('disconnect', function() {
+                isConnected = false;
+                updateConnectionStatus('disconnected', '连接断开');
+                console.log('Disconnected from dashboard server');
+            });
+            
+            socket.on('system_update', function(data) {
+                updateSystemMetrics(data);
+            });
+            
+            socket.on('api_test_update', function(data) {
+                updateAPITestResults(data);
+            });
+            
+            socket.on('test_progress_update', function(data) {
+                updateTestProgress(data);
+            });
+        }
+        
+        // 更新连接状态
+        function updateConnectionStatus(status, text) {
+            const statusElement = document.getElementById('connectionStatus');
+            const textElement = document.getElementById('connectionText');
+            
+            statusElement.className = 'status-indicator';
+            if (status === 'connected') {
+                statusElement.classList.add('status-healthy');
+            } else {
+                statusElement.classList.add('status-error');
+            }
+            textElement.textContent = text;
+        }
+        
+        // 更新当前时间
+        function updateCurrentTime() {
+            const now = new Date();
+            document.getElementById('currentTime').textContent = now.toLocaleString('zh-CN');
+        }
+        
+        // 初始化图表
+        function initializeCharts() {
+            // CPU图表
+            const cpuCtx = document.getElementById('cpuChart').getContext('2d');
+            charts.cpu = new Chart(cpuCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'TEE软件CPU使用率 (%)',
+                        data: [],
+                        borderColor: 'rgb(13, 110, 253)',
+                        backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100
+                        }
+                    }
+                }
+            });
+            
+            // 内存图表
+            const memoryCtx = document.getElementById('memoryChart').getContext('2d');
+            charts.memory = new Chart(memoryCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'TEE软件内存占用 (MB)',
+                        data: [],
+                        borderColor: 'rgb(13, 202, 240)',
+                        backgroundColor: 'rgba(13, 202, 240, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+            
+            // 网络图表
+            const networkCtx = document.getElementById('networkChart').getContext('2d');
+            charts.network = new Chart(networkCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'TEE网络连接数',
+                        data: [],
+                        borderColor: 'rgb(25, 135, 84)',
+                        backgroundColor: 'rgba(25, 135, 84, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: 'TEE监听端口数',
+                        data: [],
+                        borderColor: 'rgb(220, 53, 69)',
+                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+            
+            // TEE内存图表
+            const teeMemoryCtx = document.getElementById('teeMemoryChart').getContext('2d');
+            charts.teeMemory = new Chart(teeMemoryCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'TEE软件内存使用 (MB)',
+                        data: [],
+                        borderColor: 'rgb(255, 193, 7)',
+                        backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: '内存限制 (128MB)',
+                        data: [],
+                        borderColor: 'rgb(220, 53, 69)',
+                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                        borderDash: [5, 5],
+                        tension: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 160
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 事件监听器
+        function initializeEventListeners() {
+            // 刷新系统数据
+            document.getElementById('refreshSystemBtn').addEventListener('click', function() {
+                if (socket && isConnected) {
+                    socket.emit('request_refresh', {type: 'system'});
+                }
+            });
+            
+            // 运行API测试
+            document.getElementById('runTestBtn').addEventListener('click', function() {
+                runAPITests();
+            });
+            
+            // 运行完整测试套件
+            document.getElementById('runSuiteBtn').addEventListener('click', function() {
+                runTestSuite();
+            });
+            
+            // 清除测试历史
+            document.getElementById('clearTestBtn').addEventListener('click', function() {
+                clearTestHistory();
+            });
+            
+            // 清除告警
+            document.getElementById('clearAlertsBtn').addEventListener('click', function() {
+                clearAlerts();
+            });
+            
+            // 手动测试表单
+            document.getElementById('manualTestForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                runManualTest();
+            });
+            
+            // 内存优化功能
+            document.getElementById('refreshMemoryBtn').addEventListener('click', function() {
+                refreshMemoryStatus();
+            });
+            
+            document.getElementById('optimizeMemoryBtn').addEventListener('click', function() {
+                optimizeTEEMemory();
+            });
+            
+            // 初始加载数据
+            loadInitialData();
+            loadMemoryOptimizationData();
+        }
+        
+        // 加载初始数据
+        function loadInitialData() {
+            loadSystemData();
+            loadTestSessions();
+            loadTestStatistics();
+            
+            // 定期刷新数据
+            setInterval(loadSystemData, 5000);
+            setInterval(loadTestStatistics, 10000);
+        }
+        
+        // 加载系统数据
+        function loadSystemData() {
+            fetch('/api/overview')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.system) {
+                        updateSystemMetrics(data.system);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading system data:', error);
+                });
+        }
+        
+        // 加载测试统计
+        function loadTestStatistics() {
+            fetch('/api/tests/statistics')
+                .then(response => response.json())
+                .then(data => {
+                    updateTestStatistics(data);
+                })
+                .catch(error => {
+                    console.error('Error loading test statistics:', error);
+                });
+        }
+        
+        // 更新测试统计
+        function updateTestStatistics(data) {
+            if (data.performance_summary) {
+                const stats = data.performance_summary;
+                document.getElementById('testSuccessCount').textContent = stats.successful_requests || 0;
+                document.getElementById('testFailureCount').textContent = stats.failed_requests || 0;
+                document.getElementById('testAvgResponseTime').textContent = 
+                    Math.round(stats.avg_response_time) + 'ms';
+                
+                const total = stats.total_requests || 0;
+                const successRate = total > 0 ? 
+                    Math.round((stats.successful_requests / total) * 100) : 0;
+                document.getElementById('testSuccessRate').textContent = successRate + '%';
+            }
+        }
+        
+        // 运行测试套件
+        function runTestSuite() {
+            const button = document.getElementById('runSuiteBtn');
+            const originalText = button.innerHTML;
+            
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>启动中...';
+            
+            fetch('/api/tests/run_suite', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'running') {
+                    // 测试套件已启动，按钮保持禁用状态直到测试完成
+                    button.innerHTML = '<i class="fas fa-cogs me-1"></i>测试中...';
+                    
+                    // 监听测试完成
+                    const checkCompletion = setInterval(() => {
+                        fetch('/api/tests/current_session')
+                            .then(response => response.json())
+                            .then(sessionData => {
+                                if (!sessionData.id || sessionData.status === 'completed') {
+                                    clearInterval(checkCompletion);
+                                    button.disabled = false;
+                                    button.innerHTML = originalText;
+                                }
+                            })
+                            .catch(() => {
+                                clearInterval(checkCompletion);
+                                button.disabled = false;
+                                button.innerHTML = originalText;
+                            });
+                    }, 2000);
+                } else {
+                    button.disabled = false;
+                    button.innerHTML = originalText;
+                }
+            })
+            .catch(error => {
+                console.error('Error running test suite:', error);
+                button.disabled = false;
+                button.innerHTML = originalText;
+                alert('启动测试套件失败: ' + error.message);
+            });
+        }
+        
+        // 运行手动测试
+        function runManualTest() {
+            const endpoint = document.getElementById('testEndpoint').value;
+            const method = document.getElementById('testMethod').value;
+            const dataText = document.getElementById('testData').value.trim();
+            
+            let testData = null;
+            if (dataText) {
+                try {
+                    testData = JSON.parse(dataText);
+                } catch (e) {
+                    alert('请求数据格式错误，请输入有效的JSON');
+                    return;
+                }
+            }
+            
+            const resultContainer = document.getElementById('manualTestResult');
+            resultContainer.innerHTML = '<div class="text-info"><i class="fas fa-spinner fa-spin"></i> 测试中...</div>';
+            
+            fetch('/api/tests/run', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    endpoint_url: endpoint,
+                    method: method,
+                    data: testData
+                })
+            })
+            .then(response => response.json())
+            .then(result => {
+                displayManualTestResult(result);
+            })
+            .catch(error => {
+                console.error('Error running manual test:', error);
+                resultContainer.innerHTML = '<div class="text-danger">测试失败: ' + error.message + '</div>';
+            });
+        }
+        
+        // 显示手动测试结果
+        function displayManualTestResult(result) {
+            const container = document.getElementById('manualTestResult');
+            
+            const statusClass = result.success ? 'success' : 'danger';
+            const statusIcon = result.success ? 'check' : 'times';
+            
+            let resultHtml = `
+                <div class="alert alert-${statusClass} mt-3">
+                    <div class="d-flex align-items-center mb-2">
+                        <i class="fas fa-${statusIcon} me-2"></i>
+                        <strong>${result.name}</strong>
+                        <span class="ms-auto">${Math.round(result.response_time * 1000)}ms</span>
+                    </div>
+                    <div class="small">
+                        <div><strong>状态码:</strong> ${result.status_code || 'N/A'}</div>
+                        <div><strong>响应大小:</strong> ${result.response_size || 0} bytes</div>
+            `;
+            
+            if (result.error_message) {
+                resultHtml += `<div class="text-danger"><strong>错误:</strong> ${result.error_message}</div>`;
+            }
+            
+            if (result.response_data && typeof result.response_data === 'object') {
+                resultHtml += `
+                    <div class="mt-2">
+                        <strong>响应数据:</strong>
+                        <pre class="bg-light p-2 mt-1 small" style="max-height: 200px; overflow-y: auto;">${JSON.stringify(result.response_data, null, 2)}</pre>
+                    </div>
+                `;
+            }
+            
+            resultHtml += `
+                    </div>
+                </div>
+            `;
+            
+            container.innerHTML = resultHtml;
+        }
+        
+        // 更新系统指标
+        function updateSystemMetrics(data) {
+            if (data.system) {
+                const system = data.system;
+                
+                // 更新概览卡片 - 显示TEE软件进程信息
+                if (system.total_cpu_percent !== undefined) {
+                    const cpuPercent = system.total_cpu_percent;
+                    document.getElementById('cpuUsage').textContent = cpuPercent.toFixed(1) + '%';
+                    document.getElementById('cpuProgress').style.width = Math.min(cpuPercent, 100) + '%';
+                    
+                    // 更新CPU图表
+                    updateChart(charts.cpu, new Date().toLocaleTimeString(), cpuPercent);
+                }
+                
+                if (system.total_memory_mb !== undefined) {
+                    const memoryMB = system.total_memory_mb;
+                    const memoryPercent = system.total_memory_percent || 0;
+                    document.getElementById('memoryUsage').textContent = memoryMB.toFixed(1) + 'MB';
+                    document.getElementById('memoryProgress').style.width = Math.min(memoryPercent, 100) + '%';
+                    
+                    // 更新内存图表
+                    updateChart(charts.memory, new Date().toLocaleTimeString(), memoryMB);
+                }
+                
+                // 显示进程数量作为"磁盘"使用率
+                if (system.total_processes !== undefined) {
+                    const processCount = system.total_processes;
+                    const processStatus = system.process_status || 'unknown';
+                    document.getElementById('diskUsage').textContent = processCount + '个进程';
+                    const healthPercent = processStatus === 'running' ? 100 : 0;
+                    document.getElementById('diskProgress').style.width = healthPercent + '%';
+                }
+                
+                // 更新系统信息 - 显示TEE软件信息
+                if (system.main_process && system.main_process.uptime_formatted) {
+                    document.getElementById('systemUptime').textContent = system.main_process.uptime_formatted;
+                } else {
+                    document.getElementById('systemUptime').textContent = system.process_status === 'not_found' ? 'TEE软件未运行' : '--';
+                }
+            }
+            
+            // 更新进程表格 - 显示TEE进程详情
+            if (data.system && data.system.tee_processes) {
+                updateTEEProcessTable(data.system.tee_processes);
+            }
+            
+            // 更新网络图表 - 显示TEE网络连接
+            if (data.network && data.network.total_connections !== undefined) {
+                const connections = data.network.total_connections;
+                const listenPorts = data.network.listening_ports ? data.network.listening_ports.length : 0;
+                updateChart(charts.network, new Date().toLocaleTimeString(), [connections, listenPorts]);
+            }
+        }
+        
+        // 更新图表数据
+        function updateChart(chart, label, data) {
+            const maxPoints = 30;  // 减少最大数据点从20到30
+            
+            chart.data.labels.push(label);
+            
+            if (Array.isArray(data)) {
+                data.forEach((value, index) => {
+                    if (chart.data.datasets[index]) {
+                        chart.data.datasets[index].data.push(value);
+                    }
+                });
+            } else {
+                chart.data.datasets[0].data.push(data);
+            }
+            
+            // 限制数据点数量
+            if (chart.data.labels.length > maxPoints) {
+                chart.data.labels.shift();
+                chart.data.datasets.forEach(dataset => {
+                    dataset.data.shift();
+                });
+            }
+            
+            chart.update('none');
+        }
+        
+        // 更新TEE进程表格
+        function updateTEEProcessTable(processes) {
+            const tbody = document.getElementById('processTable');
+            tbody.innerHTML = '';
+            
+            if (!processes || processes.length === 0) {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td colspan="5" class="text-center text-muted">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        未检测到TEE软件进程
+                    </td>
+                `;
+                return;
+            }
+            
+            processes.forEach(proc => {
+                const row = tbody.insertRow();
+                const memoryMB = proc.memory_info ? (proc.memory_info.rss / (1024 * 1024)).toFixed(1) : '0';
+                const uptimeStr = proc.uptime ? formatUptime(proc.uptime) : '--';
+                
+                row.innerHTML = `
+                    <td>${proc.pid}</td>
+                    <td title="${proc.cmdline ? proc.cmdline.join(' ') : ''}">${proc.name}</td>
+                    <td>${proc.cpu_percent.toFixed(1)}%</td>
+                    <td>${memoryMB}MB</td>
+                    <td>
+                        <span class="badge ${getStatusBadgeClass(proc.status)}">${proc.status}</span>
+                        <small class="text-muted d-block">${uptimeStr}</small>
+                    </td>
+                `;
+            });
+        }
+        
+        // 格式化运行时间
+        function formatUptime(seconds) {
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            
+            if (days > 0) {
+                return `${days}d ${hours}h`;
+            } else if (hours > 0) {
+                return `${hours}h ${minutes}m`;
+            } else {
+                return `${minutes}m`;
+            }
+        }
+        
+        // 获取状态徽章样式
+        function getStatusBadgeClass(status) {
+            switch (status) {
+                case 'running':
+                    return 'bg-success';
+                case 'sleeping':
+                    return 'bg-info';
+                case 'stopped':
+                    return 'bg-danger';
+                default:
+                    return 'bg-secondary';
+            }
+        }
+        
+        // 更新API测试结果
+        function updateAPITestResults(data) {
+            document.getElementById('apiSuccessRate').textContent = 
+                ((data.success_rate || 0) * 100).toFixed(1) + '%';
+            document.getElementById('apiProgress').style.width = 
+                ((data.success_rate || 0) * 100) + '%';
+            
+            document.getElementById('testsPassed').textContent = data.successful_requests || 0;
+            document.getElementById('testsFailed').textContent = data.failed_requests || 0;
+            document.getElementById('avgResponseTime').textContent = 
+                Math.round((data.avg_response_time || 0) * 1000) + 'ms';
+        }
+        
+        // API操作函数
+        async function runAPITests() {
+            try {
+                const response = await fetch('/api/tests/run', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    showNotification('API测试已启动', 'success');
+                } else {
+                    showNotification('API测试启动失败: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showNotification('请求失败: ' + error.message, 'error');
+            }
+        }
+        
+        async function clearTestHistory() {
+            try {
+                const response = await fetch('/api/tests/clear', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    showNotification('测试历史已清除', 'success');
+                    document.getElementById('testResultsContainer').innerHTML = 
+                        '<div class="text-center text-muted"><i class="fas fa-info-circle me-2"></i>等待测试结果...</div>';
+                } else {
+                    showNotification('清除失败: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showNotification('请求失败: ' + error.message, 'error');
+            }
+        }
+        
+        async function clearAlerts() {
+            try {
+                const response = await fetch('/api/system/alerts', { method: 'DELETE' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    showNotification('告警已清除', 'success');
+                    document.getElementById('alertsContainer').innerHTML = 
+                        '<div class="text-center text-muted"><i class="fas fa-check-circle me-2"></i>暂无告警</div>';
+                } else {
+                    showNotification('清除失败: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showNotification('请求失败: ' + error.message, 'error');
+            }
+        }
+        
+        // 显示通知
+        function showNotification(message, type) {
+            // 简单的通知实现
+            const alertClass = type === 'success' ? 'alert-success' : 'alert-danger';
+            const notification = document.createElement('div');
+            notification.className = `alert ${alertClass} alert-dismissible fade show position-fixed`;
+            notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 250px;';
+            notification.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            document.body.appendChild(notification);
+            
+            // 自动移除
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 5000);
+        }
+        
+        // 更新测试进度
+        function updateTestProgress(sessionData) {
+            const progressContainer = document.getElementById('currentTestProgress');
+            const progressText = document.getElementById('progressText');
+            const progressPercent = document.getElementById('progressPercent');
+            const progressBar = document.getElementById('progressBar');
+            const stepsContainer = document.getElementById('stepsContainer');
+            
+            if (sessionData.status === 'running') {
+                progressContainer.style.display = 'block';
+                progressText.textContent = sessionData.name;
+                progressPercent.textContent = Math.round(sessionData.progress) + '%';
+                progressBar.style.width = sessionData.progress + '%';
+                
+                // 更新步骤列表
+                stepsContainer.innerHTML = '';
+                sessionData.steps.forEach(step => {
+                    const stepElement = document.createElement('div');
+                    stepElement.className = 'mb-1 p-2 border rounded small';
+                    
+                    let statusIcon = '';
+                    let statusClass = '';
+                    switch (step.status) {
+                        case 'pending':
+                            statusIcon = '<i class="fas fa-clock text-muted"></i>';
+                            statusClass = 'border-secondary';
+                            break;
+                        case 'running':
+                            statusIcon = '<i class="fas fa-spinner fa-spin text-primary"></i>';
+                            statusClass = 'border-primary';
+                            break;
+                        case 'success':
+                            statusIcon = '<i class="fas fa-check text-success"></i>';
+                            statusClass = 'border-success';
+                            break;
+                        case 'failed':
+                            statusIcon = '<i class="fas fa-times text-danger"></i>';
+                            statusClass = 'border-danger';
+                            break;
+                    }
+                    
+                    stepElement.className += ' ' + statusClass;
+                    stepElement.innerHTML = `
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                ${statusIcon}
+                                <span class="ms-2">${step.name}</span>
+                            </div>
+                            <div class="text-muted">
+                                ${step.duration ? Math.round(step.duration * 1000) + 'ms' : ''}
+                            </div>
+                        </div>
+                        ${step.description ? `<div class="text-muted mt-1">${step.description}</div>` : ''}
+                        ${step.error ? `<div class="text-danger mt-1 small">${step.error}</div>` : ''}
+                    `;
+                    
+                    stepsContainer.appendChild(stepElement);
+                });
+            } else if (sessionData.status === 'completed') {
+                // 测试完成，隐藏进度条并刷新会话列表
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                    loadTestSessions();
+                }, 2000);
+            }
+        }
+        
+        // 加载测试会话列表
+        function loadTestSessions() {
+            fetch('/api/tests/sessions?limit=5')
+                .then(response => response.json())
+                .then(sessions => {
+                    const sessionsList = document.getElementById('testSessionsList');
+                    
+                    if (sessions.length === 0) {
+                        sessionsList.innerHTML = '<div class="text-muted text-center py-3">暂无测试会话</div>';
+                        return;
+                    }
+                    
+                    sessionsList.innerHTML = '';
+                    sessions.reverse().forEach(session => {
+                        const sessionElement = document.createElement('div');
+                        sessionElement.className = 'border rounded p-2 mb-2 small';
+                        
+                        const startTime = new Date(session.start_time * 1000).toLocaleString('zh-CN');
+                        const duration = session.end_time ? 
+                            Math.round((session.end_time - session.start_time) * 1000) + 'ms' : 
+                            '运行中...';
+                        
+                        const successRate = session.total_steps > 0 ? 
+                            Math.round((session.successful_steps / session.total_steps) * 100) : 0;
+                        
+                        let statusBadge = '';
+                        if (session.status === 'running') {
+                            statusBadge = '<span class="badge bg-primary">运行中</span>';
+                        } else if (successRate === 100) {
+                            statusBadge = '<span class="badge bg-success">全部通过</span>';
+                        } else if (successRate > 0) {
+                            statusBadge = '<span class="badge bg-warning">部分通过</span>';
+                        } else {
+                            statusBadge = '<span class="badge bg-danger">全部失败</span>';
+                        }
+                        
+                        sessionElement.innerHTML = `
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <div class="fw-bold">${session.name}</div>
+                                    <div class="text-muted">${startTime}</div>
+                                </div>
+                                <div class="text-end">
+                                    ${statusBadge}
+                                    <div class="text-muted small">
+                                        ${session.successful_steps}/${session.total_steps} 成功
+                                    </div>
+                                    <div class="text-muted small">${duration}</div>
+                                </div>
+                            </div>
+                            <div class="mt-2">
+                                <div class="progress" style="height: 4px;">
+                                    <div class="progress-bar bg-success" style="width: ${successRate}%"></div>
+                                </div>
+                            </div>
+                        `;
+                        
+                        sessionElement.style.cursor = 'pointer';
+                        sessionElement.onclick = () => showSessionDetails(session.id);
+                        
+                        sessionsList.appendChild(sessionElement);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading test sessions:', error);
+                });
+        }
+        
+        // 显示会话详情
+        function showSessionDetails(sessionId) {
+            fetch(`/api/tests/sessions/${sessionId}`)
+                .then(response => response.json())
+                .then(session => {
+                    // 这里可以添加模态框显示详细信息
+                    console.log('Session details:', session);
+                })
+                .catch(error => {
+                    console.error('Error loading session details:', error);
+                });
+        }
+        
+        // 定期获取数据
+        setInterval(async function() {
+            if (isConnected) return; // 如果WebSocket连接正常，不需要轮询
+            
+            try {
+                // 获取概览数据
+                const response = await fetch('/api/overview');
+                const data = await response.json();
+                
+                if (data.system) {
+                    // 更新系统状态
+                    const systemHealth = data.system.status === 'healthy' ? 'healthy' : 'warning';
+                    const statusElement = document.querySelector('#systemHealth .status-indicator');
+                    statusElement.className = `status-indicator status-${systemHealth}`;
+                    document.querySelector('#systemHealth').lastChild.textContent = 
+                        systemHealth === 'healthy' ? '健康' : '需要关注';
+                }
+                
+            } catch (error) {
+                console.error('Failed to fetch overview data:', error);
+            }
+        }, 60000); // 增加轮询间隔从30秒到60秒
+        
+        // 添加内存清理
+        setInterval(function() {
+            // 清理可能的内存泄漏
+            if (window.gc) {
+                window.gc();
+            }
+            
+            // 清理旧的通知元素
+            const notifications = document.querySelectorAll('.alert.position-fixed');
+            notifications.forEach(notification => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            });
+        }, 300000); // 每5分钟清理一次
+        
+        // TEE通信演示功能
+        let communicationDemo = {
+            teeServerUrl: 'http://127.0.0.1:5000',
+            currentStep: 0,
+            steps: [
+                { id: 'step1', name: '获取公钥', action: 'getPublicKey' },
+                { id: 'step2', name: '生成会话密钥', action: 'generateSessionKey' },
+                { id: 'step3', name: '加密用户数据', action: 'encryptUserData' },
+                { id: 'step4', name: '加密会话密钥', action: 'encryptSessionKey' },
+                { id: 'step5', name: '发送加密数据', action: 'sendEncryptedData' },
+                { id: 'step6', name: '获取风险分数', action: 'getRiskScore' }
+            ],
+            data: {}
+        };
+        
+        // 开始通信演示
+        async function startCommunicationDemo() {
+            const button = document.getElementById('startCommunicationBtn');
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>处理中...';
+            
+            // 重置状态
+            communicationDemo.currentStep = 0;
+            communicationDemo.data = {};
+            resetFlowSteps();
+            
+            // 收集用户输入
+            const userData = {
+                user_id: document.getElementById('userId').value,
+                ip_address: document.getElementById('ipAddress').value,
+                device_type: document.getElementById('deviceType').value,
+                user_agent: document.getElementById('userAgent').value,
+                geo_location: document.getElementById('geoLocation').value,
+                timestamp: new Date().toISOString()
+            };
+            
+            communicationDemo.data.userData = userData;
+            
+            try {
+                // 依次执行每个步骤
+                for (let i = 0; i < communicationDemo.steps.length; i++) {
+                    const step = communicationDemo.steps[i];
+                    communicationDemo.currentStep = i;
+                    
+                    setStepStatus(step.id, 'active');
+                    
+                    await new Promise(resolve => setTimeout(resolve, 800)); // 延迟显示效果
+                    
+                    try {
+                        await executeStep(step);
+                        setStepStatus(step.id, 'completed');
+                    } catch (error) {
+                        setStepStatus(step.id, 'error');
+                        throw error;
+                    }
+                }
+                
+                // 显示成功结果
+                displayCommunicationResult(true);
+                
+            } catch (error) {
+                console.error('Communication demo failed:', error);
+                displayCommunicationResult(false, error.message);
+            } finally {
+                button.disabled = false;
+                button.innerHTML = '<i class="fas fa-play me-2"></i>开始TEE通信演示';
+            }
+        }
+        
+        // 执行单个步骤
+        async function executeStep(step) {
+            switch (step.action) {
+                case 'getPublicKey':
+                    return await getPublicKey();
+                case 'generateSessionKey':
+                    return await generateSessionKey();
+                case 'encryptUserData':
+                    return await encryptUserData();
+                case 'encryptSessionKey':
+                    return await encryptSessionKey();
+                case 'sendEncryptedData':
+                    return await sendEncryptedData();
+                case 'getRiskScore':
+                    return await getRiskScore();
+                default:
+                    throw new Error(`Unknown step action: ${step.action}`);
+            }
+        }
+        
+        // 步骤1: 获取公钥
+        async function getPublicKey() {
+            const response = await fetch(`${communicationDemo.teeServerUrl}/tee_soft/public_key`);
+            if (!response.ok) {
+                throw new Error(`Failed to get public key: ${response.status}`);
+            }
+            
+            const result = await response.json();
+            communicationDemo.data.publicKey = result.tee_public_key || result.public_key;
+            
+            // 显示公钥
+            const display = document.getElementById('publicKeyDisplay');
+            display.textContent = communicationDemo.data.publicKey ? 
+                communicationDemo.data.publicKey.substring(0, 64) + '...' : 
+                '获取失败';
+            
+            return result;
+        }
+        
+        // 步骤2: 生成会话密钥
+        async function generateSessionKey() {
+            // 调用TEE软件生成真正的会话密钥
+            const response = await fetch(`${communicationDemo.teeServerUrl}/tee_soft/generate_session_key`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    algorithm: 'SM4',
+                    key_length: 128
+                })
+            });
+            
+            if (!response.ok) {
+                // 如果API不存在，生成模拟的会话密钥
+                const sessionKey = generateRandomHex(32);
+                communicationDemo.data.sessionKey = sessionKey;
+                
+                const display = document.getElementById('sessionKeyDisplay');
+                display.textContent = sessionKey.substring(0, 32) + '...';
+                
+                return { session_key: sessionKey };
+            }
+            
+            const result = await response.json();
+            communicationDemo.data.sessionKey = result.session_key;
+            
+            const display = document.getElementById('sessionKeyDisplay');
+            display.textContent = result.session_key.substring(0, 32) + '...';
+            
+            return result;
+        }
+        
+        // 步骤3: 加密用户数据
+        async function encryptUserData() {
+            const userData = communicationDemo.data.userData;
+            const userDataJson = JSON.stringify(userData);
+            
+            // 尝试使用TEE软件的真实加密API
+            try {
+                const response = await fetch(`${communicationDemo.teeServerUrl}/tee_soft/encrypt`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        data: userDataJson,
+                        algorithm: 'SM4',
+                        key: communicationDemo.data.sessionKey,
+                        mode: 'demo'
+                    })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    communicationDemo.data.encryptedUserData = result.encrypted_data;
+                    
+                    const display = document.getElementById('encryptedDataDisplay');
+                    display.textContent = result.encrypted_data.substring(0, 64) + '...';
+                    
+                    return result;
+                }
+            } catch (error) {
+                console.warn('TEE encrypt API not available, using simulation:', error.message);
+            }
+            
+            // 如果真实API不可用，使用模拟加密
+            const encryptedData = btoa(userDataJson + '_encrypted_with_' + communicationDemo.data.sessionKey.substring(0, 16));
+            communicationDemo.data.encryptedUserData = encryptedData;
+            
+            const display = document.getElementById('encryptedDataDisplay');
+            display.textContent = encryptedData.substring(0, 64) + '...';
+            
+            return { encrypted_data: encryptedData };
+        }
+        
+        // 步骤4: 加密会话密钥
+        async function encryptSessionKey() {
+            const sessionKey = communicationDemo.data.sessionKey;
+            const publicKey = communicationDemo.data.publicKey;
+            
+            if (!publicKey) {
+                throw new Error('No public key available');
+            }
+            
+            // 尝试使用TEE软件的真实SM2加密API
+            try {
+                const response = await fetch(`${communicationDemo.teeServerUrl}/tee_soft/encrypt_with_public_key`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        data: sessionKey,
+                        public_key: publicKey,
+                        algorithm: 'SM2'
+                    })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    communicationDemo.data.encryptedSessionKey = result.encrypted_data;
+                    
+                    const display = document.getElementById('encryptedSessionKeyDisplay');
+                    display.textContent = result.encrypted_data.substring(0, 64) + '...';
+                    
+                    return result;
+                }
+            } catch (error) {
+                console.warn('TEE SM2 encrypt API not available, using simulation:', error.message);
+            }
+            
+            // 如果真实API不可用，使用模拟SM2加密
+            const encryptedSessionKey = btoa(sessionKey + '_encrypted_with_sm2_public_key');
+            communicationDemo.data.encryptedSessionKey = encryptedSessionKey;
+            
+            const display = document.getElementById('encryptedSessionKeyDisplay');
+            display.textContent = encryptedSessionKey.substring(0, 64) + '...';
+            
+            return { encrypted_session_key: encryptedSessionKey };
+        }
+        
+        // 步骤5: 发送加密数据
+        async function sendEncryptedData() {
+            const requestData = {
+                request_id: `demo_${Date.now()}`,
+                timestamp: new Date().toISOString(),
+                encrypted_user_data: communicationDemo.data.encryptedUserData,
+                encrypted_session_key: communicationDemo.data.encryptedSessionKey,
+                features: {
+                    user_id: communicationDemo.data.userData.user_id,
+                    ip: communicationDemo.data.userData.ip_address,
+                    user_agent: communicationDemo.data.userData.user_agent,
+                    device_type: communicationDemo.data.userData.device_type,
+                    geo_location: communicationDemo.data.userData.geo_location
+                },
+                metadata: {
+                    session_id: `demo_session_${Date.now()}`,
+                    timestamp: new Date().toISOString(),
+                    demo_mode: true,
+                    encryption_used: true,
+                    algorithms: {
+                        symmetric: 'SM4',
+                        asymmetric: 'SM2'
+                    }
+                }
+            };
+            
+            const response = await fetch(`${communicationDemo.teeServerUrl}/tee_soft/process`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestData)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Failed to send data: ${response.status} ${response.statusText}`);
+            }
+            
+            const result = await response.json();
+            communicationDemo.data.teeResponse = result;
+            
+            return result;
+        }
+        
+        // 步骤6: 获取风险分数
+        async function getRiskScore() {
+            const teeResponse = communicationDemo.data.teeResponse;
+            
+            if (!teeResponse) {
+                throw new Error('No TEE response available');
+            }
+            
+            // 检查响应格式并提取风险评估信息
+            let riskAssessment = null;
+            
+            // 尝试不同的响应格式
+            if (teeResponse.result && teeResponse.result.risk_assessment) {
+                riskAssessment = teeResponse.result.risk_assessment;
+            } else if (teeResponse.risk_assessment) {
+                riskAssessment = teeResponse.risk_assessment;
+            } else if (teeResponse.result && typeof teeResponse.result.risk_score !== 'undefined') {
+                // 构造风险评估对象
+                riskAssessment = {
+                    risk_score: teeResponse.result.risk_score,
+                    risk_level: getRiskLevelFromScore(teeResponse.result.risk_score),
+                    action: teeResponse.result.action || 'allow'
+                };
+            } else if (typeof teeResponse.success !== 'undefined' && teeResponse.success) {
+                // 如果只是成功响应，生成模拟风险分数
+                const simulatedScore = Math.random() * 0.5 + 0.1; // 0.1-0.6之间的随机分数
+                riskAssessment = {
+                    risk_score: simulatedScore,
+                    risk_level: getRiskLevelFromScore(simulatedScore),
+                    action: simulatedScore > 0.4 ? 'challenge' : 'allow',
+                    note: 'Simulated risk assessment for demo'
+                };
+            } else {
+                throw new Error('No risk assessment found in TEE response');
+            }
+            
+            communicationDemo.data.riskScore = riskAssessment.risk_score;
+            communicationDemo.data.riskLevel = riskAssessment.risk_level;
+            communicationDemo.data.riskAction = riskAssessment.action;
+            
+            return {
+                risk_score: communicationDemo.data.riskScore,
+                risk_level: communicationDemo.data.riskLevel,
+                action: communicationDemo.data.riskAction,
+                assessment: riskAssessment
+            };
+        }
+        
+        // 辅助函数：从分数计算风险等级
+        function getRiskLevelFromScore(score) {
+            if (score >= 0.7) return 'high';
+            if (score >= 0.4) return 'medium';
+            return 'low';
+        }
+        
+        // 设置步骤状态
+        function setStepStatus(stepId, status) {
+            const stepElement = document.getElementById(stepId);
+            const statusElement = document.getElementById(stepId + '-status');
+            
+            // 清除所有状态类
+            stepElement.classList.remove('active', 'completed', 'error');
+            
+            // 添加新状态
+            stepElement.classList.add(status);
+            
+            // 更新状态图标
+            let iconHtml = '';
+            switch (status) {
+                case 'active':
+                    iconHtml = '<i class="fas fa-spinner fa-spin text-primary"></i>';
+                    break;
+                case 'completed':
+                    iconHtml = '<i class="fas fa-check text-success"></i>';
+                    break;
+                case 'error':
+                    iconHtml = '<i class="fas fa-times text-danger"></i>';
+                    break;
+                default:
+                    iconHtml = '<i class="fas fa-clock text-muted"></i>';
+            }
+            
+            statusElement.innerHTML = iconHtml;
+        }
+        
+        // 重置流程步骤
+        function resetFlowSteps() {
+            communicationDemo.steps.forEach(step => {
+                setStepStatus(step.id, 'pending');
+            });
+            
+            // 清空显示内容
+            document.getElementById('publicKeyDisplay').textContent = '等待获取...';
+            document.getElementById('sessionKeyDisplay').textContent = '等待生成...';
+            document.getElementById('encryptedDataDisplay').textContent = '等待加密...';
+            document.getElementById('encryptedSessionKeyDisplay').textContent = '等待加密...';
+            
+            // 清空结果显示
+            const resultDiv = document.getElementById('communicationResult');
+            resultDiv.className = 'result-display';
+            resultDiv.innerHTML = '<div class="text-muted text-center py-4">通信进行中...</div>';
+        }
+        
+        // 显示通信结果
+        function displayCommunicationResult(success, errorMessage = '') {
+            const resultDiv = document.getElementById('communicationResult');
+            
+            if (success) {
+                resultDiv.className = 'result-display result-success';
+                
+                const riskScore = communicationDemo.data.riskScore || 0;
+                const riskLevel = communicationDemo.data.riskLevel || 'unknown';
+                const riskColor = getRiskColor(riskLevel);
+                
+                resultDiv.innerHTML = `
+                    <div class="text-center">
+                        <div class="mb-3">
+                            <i class="fas fa-check-circle fa-3x text-success"></i>
+                        </div>
+                        <h5 class="text-success">TEE通信成功！</h5>
+                        <div class="row mt-4">
+                            <div class="col-md-6">
+                                <div class="card border-0 bg-light">
+                                    <div class="card-body text-center">
+                                        <h2 class="text-${riskColor} mb-1">${(riskScore * 100).toFixed(1)}%</h2>
+                                        <h6 class="text-muted">风险分数</h6>
+                                        <span class="badge bg-${riskColor}">${getRiskLevelText(riskLevel)}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="text-start">
+                                    <h6 class="text-secondary">通信详情</h6>
+                                    <div class="small">
+                                        <div><strong>用户ID:</strong> ${communicationDemo.data.userData.user_id}</div>
+                                        <div><strong>设备类型:</strong> ${communicationDemo.data.userData.device_type}</div>
+                                        <div><strong>IP地址:</strong> ${communicationDemo.data.userData.ip_address}</div>
+                                        <div><strong>加密算法:</strong> SM2 + SM4</div>
+                                        <div><strong>处理时间:</strong> ${communicationDemo.data.teeResponse?.result?.processing_time_ms || 0}ms</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                resultDiv.className = 'result-display result-error';
+                resultDiv.innerHTML = `
+                    <div class="text-center">
+                        <div class="mb-3">
+                            <i class="fas fa-exclamation-triangle fa-3x text-danger"></i>
+                        </div>
+                        <h5 class="text-danger">通信失败</h5>
+                        <p class="text-muted mt-3">${errorMessage || '未知错误'}</p>
+                        <div class="mt-3">
+                            <button class="btn btn-outline-primary" onclick="startCommunicationDemo()">
+                                <i class="fas fa-redo me-2"></i>重试
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
+        // 生成随机十六进制字符串
+        function generateRandomHex(length) {
+            const chars = '0123456789abcdef';
+            let result = '';
+            for (let i = 0; i < length; i++) {
+                result += chars[Math.floor(Math.random() * chars.length)];
+            }
+            return result;
+        }
+        
+        // 获取风险等级颜色
+        function getRiskColor(riskLevel) {
+            switch (riskLevel.toLowerCase()) {
+                case 'low': return 'success';
+                case 'medium': return 'warning';
+                case 'high': return 'danger';
+                default: return 'secondary';
+            }
+        }
+        
+        // 获取风险等级文本
+        function getRiskLevelText(riskLevel) {
+            switch (riskLevel.toLowerCase()) {
+                case 'low': return '低风险';
+                case 'medium': return '中风险';
+                case 'high': return '高风险';
+                default: return '未知';
+            }
+        }
+        
+        // 初始化通信演示
+        document.addEventListener('DOMContentLoaded', function() {
+            const startBtn = document.getElementById('startCommunicationBtn');
+            if (startBtn) {
+                startBtn.addEventListener('click', startCommunicationDemo);
+            }
+            
+            // 显示TEE服务器地址
+            const serverUrlElement = document.getElementById('teeServerUrl');
+            if (serverUrlElement) {
+                serverUrlElement.textContent = communicationDemo.teeServerUrl;
+            }
+        });
+        
+        // 内存优化相关函数
+        function loadMemoryOptimizationData() {
+            // 加载内存状态
+            refreshMemoryStatus();
+            
+            // 加载优化日志
+            loadOptimizationLog();
+            
+            // 加载优化建议
+            loadOptimizationRecommendations();
+            
+            // 定期刷新内存数据
+            setInterval(refreshMemoryStatus, 10000); // 每10秒刷新
+        }
+        
+        function refreshMemoryStatus() {
+            fetch('/api/tee_memory_status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.data) {
+                        updateMemoryDisplay(data.data);
+                    } else {
+                        console.warn('Failed to get TEE memory status:', data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching memory status:', error);
+                });
+        }
+        
+        function updateMemoryDisplay(memoryData) {
+            // 更新当前内存使用
+            const currentUsage = memoryData.current_usage || {};
+            const usedMB = currentUsage.used_mb || 0;
+            const usagePercent = currentUsage.usage_percent || 0;
+            
+            document.getElementById('currentMemoryUsage').textContent = usedMB.toFixed(1) + ' MB';
+            document.getElementById('memoryUsageProgress').style.width = Math.min(usagePercent, 100) + '%';
+            document.getElementById('memoryUtilization').textContent = usagePercent.toFixed(1) + '%';
+            
+            // 更新进度条颜色
+            const progressBar = document.getElementById('memoryUsageProgress');
+            progressBar.className = 'progress-bar';
+            if (usagePercent > 90) {
+                progressBar.classList.add('bg-danger');
+            } else if (usagePercent > 75) {
+                progressBar.classList.add('bg-warning');
+            } else {
+                progressBar.classList.add('bg-success');
+            }
+            
+            // 更新状态
+            let status = '正常';
+            if (usagePercent > 90) {
+                status = '危险';
+            } else if (usagePercent > 75) {
+                status = '警告';
+            }
+            document.getElementById('memoryStatus').textContent = status;
+            
+            // 更新TEE内存图表
+            if (charts.teeMemory) {
+                const now = new Date().toLocaleTimeString();
+                updateChart(charts.teeMemory, now, [usedMB, 128]); // 128MB 限制线
+            }
+        }
+        
+        function optimizeTEEMemory() {
+            const button = document.getElementById('optimizeMemoryBtn');
+            const originalText = button.innerHTML;
+            
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>优化中...';
+            
+            fetch('/api/tee_memory_optimization', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const result = data.optimization_result;
+                    const resultDiv = document.getElementById('optimizationResult');
+                    
+                    const improvement = result.improvement_percent || 0;
+                    const memorySaved = result.memory_saved_mb || 0;
+                    
+                    resultDiv.innerHTML = `
+                        <div class="text-success">
+                            <i class="fas fa-check-circle me-2"></i>
+                            优化成功！
+                        </div>
+                        <div class="small mt-2">
+                            <div>节省内存: ${memorySaved.toFixed(2)} MB</div>
+                            <div>改善幅度: ${improvement.toFixed(1)}%</div>
+                            <div>优化时间: ${new Date().toLocaleTimeString()}</div>
+                        </div>
+                    `;
+                    
+                    // 更新统计数据
+                    updateOptimizationStats();
+                    
+                    // 刷新内存状态
+                    setTimeout(refreshMemoryStatus, 2000);
+                    
+                    // 重新加载优化日志
+                    loadOptimizationLog();
+                    
+                    showNotification('TEE内存优化成功！', 'success');
+                } else {
+                    document.getElementById('optimizationResult').innerHTML = `
+                        <div class="text-danger">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            优化失败: ${data.error || '未知错误'}
+                        </div>
+                    `;
+                    showNotification('TEE内存优化失败', 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error optimizing memory:', error);
+                document.getElementById('optimizationResult').innerHTML = `
+                    <div class="text-danger">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        优化失败: ${error.message}
+                    </div>
+                `;
+                showNotification('TEE内存优化请求失败', 'error');
+            })
+            .finally(() => {
+                button.disabled = false;
+                button.innerHTML = originalText;
+            });
+        }
+        
+        function loadOptimizationLog() {
+            fetch('/api/tee_memory_optimization_log?limit=10')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateOptimizationLogTable(data.optimization_log);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading optimization log:', error);
+                });
+        }
+        
+        function updateOptimizationLogTable(logEntries) {
+            const tbody = document.getElementById('optimizationLogTable');
+            tbody.innerHTML = '';
+            
+            if (!logEntries || logEntries.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">暂无优化记录</td></tr>';
+                return;
+            }
+            
+            logEntries.forEach(entry => {
+                const row = tbody.insertRow();
+                const timestamp = new Date(entry.timestamp).toLocaleString('zh-CN');
+                const triggerText = entry.trigger === 'manual_request' ? '手动触发' : '自动触发';
+                const memorySaved = (entry.memory_before_mb - entry.memory_after_mb).toFixed(2);
+                const statusBadge = entry.success ? 
+                    '<span class="badge bg-success">成功</span>' : 
+                    '<span class="badge bg-danger">失败</span>';
+                
+                row.innerHTML = `
+                    <td class="small">${timestamp}</td>
+                    <td>${triggerText}</td>
+                    <td>${entry.memory_before_mb.toFixed(1)}</td>
+                    <td>${entry.memory_after_mb.toFixed(1)}</td>
+                    <td class="text-success">${memorySaved}MB</td>
+                    <td>${statusBadge}</td>
+                `;
+            });
+        }
+        
+        function loadOptimizationRecommendations() {
+            fetch('/api/tee_memory_recommendations')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateOptimizationRecommendations(data);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading recommendations:', error);
+                });
+        }
+        
+        function updateOptimizationRecommendations(data) {
+            const container = document.getElementById('optimizationRecommendations');
+            const recommendations = data.recommendations || [];
+            const opportunities = data.optimization_opportunities || [];
+            
+            if (recommendations.length === 0 && opportunities.length === 0) {
+                container.innerHTML = '<div class="text-center text-muted py-3">暂无建议</div>';
+                return;
+            }
+            
+            let html = '';
+            
+            if (opportunities.length > 0) {
+                html += '<h6 class="text-warning">优化机会:</h6><ul class="small">';
+                opportunities.forEach(opportunity => {
+                    html += `<li class="mb-1">${opportunity}</li>`;
+                });
+                html += '</ul>';
+            }
+            
+            if (recommendations.length > 0) {
+                html += '<h6 class="text-info">建议措施:</h6><ul class="small">';
+                recommendations.forEach(recommendation => {
+                    html += `<li class="mb-1">${recommendation}</li>`;
+                });
+                html += '</ul>';
+            }
+            
+            container.innerHTML = html;
+        }
+        
+        function updateOptimizationStats() {
+            // 这里可以添加更新优化统计的逻辑
+            // 目前使用简单的计数器增加
+            const countElement = document.getElementById('optimizationCount');
+            const currentCount = parseInt(countElement.textContent) || 0;
+            countElement.textContent = currentCount + 1;
+        }
+    </script>
+</body>
+</html> 

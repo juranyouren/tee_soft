@@ -1,0 +1,78 @@
+# 低内存模式配置
+# 确保TEE软件内存占用不超过128MB
+
+low_memory_optimization:
+  # 基础配置
+  enabled: true
+  memory_limit_mb: 128
+  strict_mode: true  # 严格模式，超过限制时强制清理
+  
+  # 内存池配置
+  memory_pool:
+    enabled: true
+    max_pool_size: 50  # 减少池大小
+    buffer_sizes: [1024, 4096, 8192, 16384]  # 支持的缓冲区大小
+    
+  # 流式处理配置
+  stream_processing:
+    enabled: true
+    chunk_size: 4096  # 4KB chunks，减少内存占用
+    max_chunks_in_memory: 10  # 最多同时保持10个块在内存中
+    enable_compression: true  # 启用压缩以减少内存
+    
+  # 缓存配置
+  hash_cache:
+    enabled: true
+    max_entries: 500  # 减少缓存条目
+    max_entry_size_kb: 50  # 单个条目最大50KB
+    auto_cleanup: true
+    cleanup_threshold: 400  # 400个条目时开始清理
+    
+  # 监控和清理配置
+  monitoring:
+    check_interval_seconds: 15  # 每15秒检查一次
+    memory_pressure_threshold: 0.80  # 80%时触发压力警告
+    emergency_cleanup_threshold: 0.90  # 90%时触发紧急清理
+    
+  cleanup:
+    auto_cleanup: true
+    gc_frequency: 30  # 每30秒强制垃圾回收
+    clear_cache_on_pressure: true
+    
+  # 数据处理优化
+  data_processing:
+    batch_size: 50  # 批处理大小
+    large_data_threshold_kb: 500  # 500KB以上使用流式处理
+    enable_lazy_loading: true  # 启用延迟加载
+    compress_large_objects: true  # 压缩大对象
+    
+  # 特征处理优化
+  feature_processing:
+    max_features_per_batch: 20  # 每批最多处理20个特征
+    feature_cache_size: 100  # 特征缓存大小
+    enable_feature_compression: true
+    
+  # 加密优化
+  encryption:
+    chunk_encrypt: true  # 启用分块加密
+    stream_cipher_preferred: true  # 优先使用流密码
+    memory_efficient_padding: true
+    
+  # 数据库优化
+  database:
+    connection_pool_size: 2  # 减少连接池大小
+    batch_insert_size: 50  # 批量插入大小
+    use_streaming_results: true  # 使用流式结果集
+    
+  # 告警配置
+  alerts:
+    memory_usage_warning: 75  # 75%内存使用率时告警
+    memory_usage_critical: 90  # 90%内存使用率时严重告警
+    cache_miss_rate_warning: 0.8  # 缓存未命中率80%时告警
+    
+  # 性能调优
+  performance:
+    disable_debug_logging: true  # 禁用调试日志以节省内存
+    minimize_metadata: true  # 最小化元数据
+    use_generators: true  # 使用生成器而不是列表
+    enable_memory_mapping: false  # 在内存受限环境下禁用内存映射 

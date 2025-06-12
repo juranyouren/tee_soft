@@ -363,6 +363,10 @@ class MemoryMonitor:
         except Exception as e:
             self.logger.error(f"Failed to get process info: {e}")
             return {'error': str(e)}
+    
+    def get_memory_info(self) -> Dict[str, Any]:
+        """获取内存信息（向后兼容方法）"""
+        return self.check_memory_usage()
 
 
 # 全局内存监控器实例

@@ -648,6 +648,71 @@ class RBAEngine:
         
         self.logger.info(f"Updated thresholds: reject={self.reject_threshold}, challenge={self.challenge_threshold}")
 
+    def assess_risk(self, features: Dict[str, Any], context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        评估风险（向后兼容方法）
+        
+        Args:
+            features: 特征数据
+            context: 上下文信息
+            
+        Returns:
+            风险评估结果
+        """
+        if context is None:
+            context = {}
+        
+        # 提取用户ID和其他参数
+        user_id = context.get('user_id', 'unknown')
+        
+        # 使用默认权重
+        feature_weights = self.get_feature_weights()
+        
+        # 创建默认的全局统计信息
+        global_stats = {'basic_statistics': {'total_records': 1000}}
+        
+        # 创建空的用户历史记录
+        user_history = []
+        
+        try:
+            # 调用完整的风险计算方法
+            result = self.calculate_risk_score(
+                user_id, features, feature_weights, global_stats, user_history
+            )
+            
+            # 转换为简化的结果格式
+            simplified_result = {
+                'user_id': user_id,
+                'risk_score': result['risk_score'],
+                'risk_level': self._get_risk_level(result['risk_score']),
+                'action': result['action'],
+                'assessment_timestamp': result['calculation_timestamp'],
+                'context': context
+            }
+            
+            return simplified_result
+            
+        except Exception as e:
+            self.logger.error(f"Risk assessment failed: {e}")
+            return {
+                'user_id': user_id,
+                'risk_score': 0.5,
+                'risk_level': 'MEDIUM',
+                'action': 'CHALLENGE',
+                'error': str(e),
+                'assessment_timestamp': time.time(),
+                'context': context
+            }
+    
+    def _get_risk_level(self, risk_score: float) -> str:
+        """根据风险分数获取风险等级"""
+        if risk_score >= self.reject_threshold:
+            return 'HIGH'
+        elif risk_score >= self.challenge_threshold:
+            return 'MEDIUM'
+        else:
+            return 'LOW'
+
 
 # 全局RBA引擎实例
 _rba_engine: Optional[RBAEngine] = None

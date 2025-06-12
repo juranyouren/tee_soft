@@ -34,6 +34,13 @@ from .database_crypto_engine import (
     initialize_database_crypto_engine
 )
 
+# 新增：导入低内存优化器
+from utils.low_memory_optimizer import (
+    get_low_memory_optimizer,
+    initialize_low_memory_mode,
+    LowMemoryError
+)
+
 
 class TEEProcessorError(Exception):
     """TEE处理器异常"""
@@ -67,6 +74,9 @@ class TEEProcessor:
         self.session_key_manager = None
         self.tee_keypair_manager = None
         self.database_crypto_engine = None
+        
+        # 新增：低内存优化器
+        self.low_memory_optimizer = None
         
         # 初始化标志
         self._initialized = False
@@ -142,6 +152,9 @@ class TEEProcessor:
                 db_crypto_config = all_configs.get('database_security', {})
             self.database_crypto_engine = initialize_database_crypto_engine(db_crypto_config)
             
+            # 新增：低内存优化器
+            self.low_memory_optimizer = get_low_memory_optimizer()
+            
             self._initialized = True
             self.logger.info("TEE processor initialized successfully with improved key management")
             self.logger.info("Key isolation: Communication <-> Database keys are completely separated")
@@ -174,6 +187,12 @@ class TEEProcessor:
         validated_features = None
         
         try:
+            # 使用低内存优化器检查内存状态
+            if self.low_memory_optimizer:
+                self.low_memory_optimizer.periodic_cleanup()
+                if self.low_memory_optimizer.check_memory_pressure():
+                    self.logger.warning("High memory pressure detected, using optimized processing")
+            
             # 1. 使用TEE私钥解密会话密钥
             encrypted_session_key = encrypted_message.get('encrypted_session_key')
             if not encrypted_session_key:
@@ -193,22 +212,66 @@ class TEEProcessor:
             
             # 支持多种特征数据格式
             if isinstance(encrypted_features_data, dict):
-                # 多个特征分别加密
+                # 多个特征分别加密 - 使用内存优化
                 decrypted_features = {}
-                for feature_name, encrypted_feature in encrypted_features_data.items():
-                    feature_bytes = self.session_key_manager.decrypt_with_session_key(
-                        encrypted_feature, session_key
+                
+                # 如果特征数据很多，使用内存优化器进行分批处理
+                if self.low_memory_optimizer and len(encrypted_features_data) > 10:
+                    self.logger.info("Using optimized processing for large feature set")
+                    decrypted_features = self.low_memory_optimizer.optimize_dict_processing(
+                        encrypted_features_data
                     )
-                    # 解析JSON格式的特征数据
-                    try:
-                        decrypted_features[feature_name] = json.loads(feature_bytes.decode('utf-8'))
-                    except json.JSONDecodeError:
-                        decrypted_features[feature_name] = feature_bytes.decode('utf-8')
+                    # 解密每个优化处理的特征
+                    for feature_name, encrypted_feature in decrypted_features.items():
+                        if isinstance(encrypted_feature, (str, bytes)):
+                            feature_bytes = self.session_key_manager.decrypt_with_session_key(
+                                encrypted_feature, session_key
+                            )
+                            try:
+                                decrypted_features[feature_name] = json.loads(feature_bytes.decode('utf-8'))
+                            except json.JSONDecodeError:
+                                decrypted_features[feature_name] = feature_bytes.decode('utf-8')
+                else:
+                    # 正常处理较小的特征集
+                    for feature_name, encrypted_feature in encrypted_features_data.items():
+                        # 使用内存优化器处理解密操作
+                        if self.low_memory_optimizer:
+                            feature_bytes = self.low_memory_optimizer.optimize_data_processing(
+                                encrypted_feature, 'decrypt'
+                            )
+                            if feature_bytes == encrypted_feature:  # 优化器没有处理，使用正常解密
+                                feature_bytes = self.session_key_manager.decrypt_with_session_key(
+                                    encrypted_feature, session_key
+                                )
+                        else:
+                            feature_bytes = self.session_key_manager.decrypt_with_session_key(
+                                encrypted_feature, session_key
+                            )
+                        
+                        # 解析JSON格式的特征数据
+                        try:
+                            decrypted_features[feature_name] = json.loads(feature_bytes.decode('utf-8'))
+                        except json.JSONDecodeError:
+                            decrypted_features[feature_name] = feature_bytes.decode('utf-8')
+                        
+                        # 定期清理内存
+                        if self.low_memory_optimizer and len(decrypted_features) % 5 == 0:
+                            self.low_memory_optimizer.periodic_cleanup()
             else:
-                # 整体加密的特征数据
-                features_bytes = self.session_key_manager.decrypt_with_session_key(
-                    encrypted_features_data, session_key
-                )
+                # 整体加密的特征数据 - 使用流式处理
+                if self.low_memory_optimizer:
+                    features_bytes = self.low_memory_optimizer.optimize_data_processing(
+                        encrypted_features_data, 'decrypt'
+                    )
+                    if features_bytes == encrypted_features_data:  # 优化器没有处理，使用正常解密
+                        features_bytes = self.session_key_manager.decrypt_with_session_key(
+                            encrypted_features_data, session_key
+                        )
+                else:
+                    features_bytes = self.session_key_manager.decrypt_with_session_key(
+                        encrypted_features_data, session_key
+                    )
+                
                 decrypted_features = json.loads(features_bytes.decode('utf-8'))
             
             self.logger.info(f"Successfully decrypted {len(decrypted_features)} features")
